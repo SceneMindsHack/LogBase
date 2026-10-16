@@ -1,3 +1,13 @@
+# Data (too big, and not allowed in the public repo)
 data/
-.env
-.kiro
+*.zip
+*.tar.gz
+*.log
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Kiro
+.kiro/
