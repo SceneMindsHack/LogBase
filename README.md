@@ -147,6 +147,43 @@ The result reports normalized `filters`, `counted_metric`, `total_matching_rows`
 demonstration-only ownership and causation limits explicit. Unmapped components
 belong to `Unassigned`.
 
+## MCP tool: `distinctive_terms`
+
+`distinctive_terms` answers "what words became unusually common during this period
+compared with a baseline?" It uses SereneDB's native inverted-index term dictionary
+(`ts_dict_agg(content)` and `ts_dict_count(content)`) to count, per term, how many
+records contain it. This is document frequency: a line containing a word several
+times counts once for that term. All counting happens in the database.
+
+| Parameter | Meaning |
+|---|---|
+| `dataset` | Required: `bgl` or `openstack` |
+| `foreground_start`, `foreground_end` | Required source-local ISO bounds, inclusive then exclusive |
+| `baseline_start`, `baseline_end` | Required baseline window; must not overlap the foreground (adjacent is allowed) |
+| `component` | Optional exact component filter, applied to both windows |
+| `levels` | Optional non-empty exact level list, applied to both windows (all levels if omitted) |
+| `min_foreground_docs` | Minimum foreground support, positive; default 5 |
+| `top_n` | Number of terms to return, 1 to 50; default 10 |
+| `exclude_terms` | Optional extra exact terms to drop, added to a small default list |
+
+Example (compare two OpenStack hours on a day with data):
+
+```json
+{"dataset":"openstack","foreground_start":"2017-05-16T00:00:00","foreground_end":"2017-05-16T01:00:00","baseline_start":"2017-05-16T01:00:00","baseline_end":"2017-05-16T02:00:00","min_foreground_docs":20,"top_n":5}
+```
+
+For each term the result gives `foreground_docs`, `baseline_docs`, both shares
+(0-1 proportions of eligible records), `share_change_pp`, `excess_documents`
+(`foreground_docs - foreground_total * baseline_share`), `ratio` (null when the
+term is absent from the baseline, with `new_in_baseline_comparison` true), and
+window denominators. `method` names the native functions and the score definition.
+The score orders terms by over-representation; it is a transparent heuristic, not a
+p-value. Shares are proportions of log records, not failure rates, and terms are
+investigative leads, not proven causes. `status` is `ok`, `no_distinctive_terms`,
+or `insufficient_data` (a window with no eligible records). Eligible records are
+timed rows with non-null content matching the filters. Results reflect the index
+as last refreshed by `scripts/search_logs.py --setup`.
+
 ## Tests
 
 ```sh
