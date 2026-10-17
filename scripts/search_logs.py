@@ -27,7 +27,7 @@ def setup(dataset):
     print(f'{index}: ready; refresh took {time.perf_counter() - started:.2f}s', flush=True)
 
 
-def query_sql(dataset, query, limit=10, since=None, until=None):
+def query_sql(dataset, query, limit=10, since=None, until=None, levels=None):
     if dataset not in DATASETS:
         raise ValueError('Unknown dataset')
     if not 1 <= limit <= 100:
@@ -35,6 +35,14 @@ def query_sql(dataset, query, limit=10, since=None, until=None):
     if not query.strip() or len(query) > 1000:
         raise ValueError('Query must contain 1 to 1000 characters')
     filters = ['content @@ ' + literal(query)]
+    if levels is not None:
+        if not isinstance(levels, list) or not levels:
+            raise ValueError('levels must be a non-empty list when provided')
+        for level in levels:
+            if not isinstance(level, str) or not level.strip():
+                raise ValueError('levels must contain non-empty strings')
+        quoted = ', '.join(literal(level) for level in dict.fromkeys(levels))
+        filters.append(f'level IN ({quoted})')
     for value, operator in ((since, '>='), (until, '<')):
         if value:
             parsed = datetime.fromisoformat(value)
@@ -51,13 +59,15 @@ def query_sql(dataset, query, limit=10, since=None, until=None):
     return count, evidence
 
 
-def search(dataset, query, limit, since=None, until=None):
-    count_sql, evidence_sql = query_sql(dataset, query, limit, since, until)
+def search(dataset, query, limit, since=None, until=None, levels=None):
+    count_sql, evidence_sql = query_sql(dataset, query, limit, since, until, levels)
     started = time.perf_counter()
     count = int(records(count_sql)[0]['matches'])
     evidence = records(evidence_sql)
     return {'dataset': dataset, 'query': query, 'since_inclusive': since,
-            'until_exclusive': until, 'total_matches': count, 'returned': len(evidence),
+            'until_exclusive': until,
+            'levels': list(dict.fromkeys(levels)) if levels is not None else None,
+            'total_matches': count, 'returned': len(evidence),
             'truncated': count > len(evidence), 'content_preview_limit': 500,
             'elapsed_seconds': round(time.perf_counter() - started, 3),
             'sql': [count_sql, evidence_sql], 'evidence': evidence}
@@ -71,15 +81,17 @@ if __name__ == '__main__':
     parser.add_argument('--limit', type=int, default=10)
     parser.add_argument('--since', help='Source-local ISO datetime, inclusive')
     parser.add_argument('--until', help='Source-local ISO datetime, exclusive')
+    parser.add_argument('--level', action='append', dest='levels',
+                        help='Restrict to this level; repeatable')
     args = parser.parse_args()
     if not args.setup and args.query is None:
         parser.error('Choose --setup, --query, or both')
     datasets = DATASETS if args.dataset == 'all' else (args.dataset,)
     if args.query is not None:
         for dataset in datasets:
-            query_sql(dataset, args.query, args.limit, args.since, args.until)
+            query_sql(dataset, args.query, args.limit, args.since, args.until, args.levels)
     for dataset in datasets:
         if args.setup:
             setup(dataset)
         if args.query is not None:
-            print(json.dumps(search(dataset, args.query, args.limit, args.since, args.until), indent=2))
+            print(json.dumps(search(dataset, args.query, args.limit, args.since, args.until, args.levels), indent=2))

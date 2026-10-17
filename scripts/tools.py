@@ -135,13 +135,14 @@ def data_overview(dataset: str = "all") -> dict:
 
 @mcp.tool()
 def search(dataset: str, query: str, limit: int = 10,
-           since: str | None = None, until: str | None = None) -> dict:
+           since: str | None = None, until: str | None = None,
+           levels: list[str] | None = None) -> dict:
     """Full-text search returning a total match count and bounded evidence.
 
-    Full-text token matching on log content (not substring matching, and
-    separate from level/severity filtering). total_matches is the unlimited
-    count; limit bounds only the returned evidence rows. content_preview is
-    truncated to 500 characters.
+    Full-text token matching on log content (not substring matching). Level
+    filtering is a separate exact match on the level column, applied in addition
+    to the full-text query. total_matches is the unlimited count; limit bounds
+    only the returned evidence rows. content_preview is truncated to 500 characters.
 
     Args:
         dataset: "bgl" or "openstack".
@@ -149,8 +150,9 @@ def search(dataset: str, query: str, limit: int = 10,
         limit: Max evidence rows returned, 1 to 100 (default 10).
         since: Optional source-local ISO datetime, inclusive (no timezone offset).
         until: Optional source-local ISO datetime, exclusive (no timezone offset).
+        levels: Optional non-empty list of exact levels to restrict to (e.g. ["FATAL"]).
     """
-    return _search(dataset, query, limit, since, until)
+    return _search(dataset, query, limit, since, until, levels)
 
 
 @mcp.tool()
