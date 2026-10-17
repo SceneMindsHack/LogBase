@@ -32,6 +32,11 @@ try:
 except ImportError:
     from nearby_events import nearby as _nearby
 
+try:
+    from .get_event_details import get_event_details as _get_event_details
+except ImportError:
+    from get_event_details import get_event_details as _get_event_details
+
 mcp = FastMCP("LogBase")
 
 
@@ -175,6 +180,23 @@ def nearby_events(dataset: str, window_minutes: int = 5, limit: int = 10,
     return _nearby(dataset, window_minutes, limit, anchor_time=anchor_time,
                    source_file=source_file, line_id=line_id, node=node,
                    component=component, all_nodes=all_nodes)
+
+
+@mcp.tool()
+def get_event_details(dataset: str, source_file: str, line_id: int) -> dict:
+    """Retrieve one complete log event by its stable evidence identity.
+
+    Use this after search or aggregation tools when complete evidence is needed.
+    The identity is dataset + source_file + line_id; timestamps alone are not
+    unique. Returns all common fields, dataset-specific fields, recoverable raw
+    evidence, and the fictional owning team without modifying stored data.
+
+    Args:
+        dataset: "bgl" or "openstack".
+        source_file: Exact source filename returned by another LogBase tool.
+        line_id: Positive physical line number within the source file.
+    """
+    return _get_event_details(dataset, source_file, line_id)
 
 
 if __name__ == "__main__":
