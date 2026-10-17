@@ -120,7 +120,7 @@ def scan(dataset, paths):
 
 
 def load(datasets, reports):
-    from docker_db import execute, records, copy_rows
+    from db import execute, records, copy_rows
     schema = (Path(__file__).resolve().parents[1] / 'sql' / 'schema.sql').read_text(encoding='utf-8')
     execute(schema)
     # Check all selected tables before writing any rows.
@@ -161,6 +161,21 @@ def load(datasets, reports):
         print(f'Loaded and verified {dataset}: {result["total"]} rows', flush=True)
 
 
+def input_files(root, dataset='all'):
+    datasets = {
+        'bgl': [root / 'BGL' / 'BGL.log'],
+        'openstack': [root / 'OpenStack' / name for name in
+                      ('openstack_normal1.log', 'openstack_normal2.log', 'openstack_abnormal.log')],
+    }
+    if dataset != 'all':
+        datasets = {dataset: datasets[dataset]}
+    for paths in datasets.values():
+        for path in paths:
+            if not path.is_file():
+                raise FileNotFoundError(f'Missing input: {path}')
+    return datasets
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data-root', type=Path, required=True,
@@ -169,17 +184,7 @@ def main():
     parser.add_argument('--report', type=Path, default=Path('reports/load-report.json'))
     parser.add_argument('--load', action='store_true', help='Write validated data to SereneDB')
     args = parser.parse_args()
-    datasets = {
-        'bgl': [args.data_root / 'BGL' / 'BGL.log'],
-        'openstack': [args.data_root / 'OpenStack' / name for name in
-                      ('openstack_normal1.log', 'openstack_normal2.log', 'openstack_abnormal.log')],
-    }
-    if args.dataset != 'all':
-        datasets = {args.dataset: datasets[args.dataset]}
-    for paths in datasets.values():
-        for path in paths:
-            if not path.is_file():
-                parser.error(f'Missing input: {path}')
+    datasets = input_files(args.data_root, args.dataset)
     reports = {dataset: scan(dataset, paths) for dataset, paths in datasets.items()}
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(reports, indent=2), encoding='utf-8')

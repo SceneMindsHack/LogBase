@@ -2,7 +2,7 @@
 from pathlib import Path
 from uuid import uuid4
 import base64
-from docker_db import execute, records, copy_rows
+from db import execute, records, copy_rows
 from load_logs import COMMON, EXTRA, parse_line
 
 if __name__ == '__main__':

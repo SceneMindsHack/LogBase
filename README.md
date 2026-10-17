@@ -1,65 +1,116 @@
 # LogBase
 
-Local BGL and OpenStack log preparation for SereneDB. Currently provides a
-shared schema, full-data loader, validation and fictional ownership mapping.
-MCP tools are not implemented yet.
+Load, verify, export and search BGL/OpenStack logs in SereneDB. One shared parser
+and schema serve both datasets. MCP tools and agent workflows are the next layer.
 
-See [database setup](docs/database-setup.md) for the complete workflow.
+## Choose a connection
 
-| File | Purpose |
+Copy `.env.example` to `.env`. Every Python command below reads this same file.
+Environment variables already set in the terminal take precedence.
+
+| Choice | Setting | Requirements | Recommended use |
+|---|---|---|---|
+| Local Docker | `SERENEDB_CONNECTION=docker` | Docker CLI and a running `serenedb` container; no password | Easiest local setup; default |
+| Direct Python | `SERENEDB_CONNECTION=direct` | Host, port, database, user and configured password; uses psycopg | Direct application/database access |
+
+Both choices use database `logbase`, the same schema and the same commands.
+See [setup instructions](docs/database-setup.md) for password configuration,
+existing-container handling and Windows/Linux/macOS environment commands.
+
+## Quick start
+
+From the repository root, with the Python environment active:
+
+```sh
+python -m pip install -r requirements.txt
+python scripts/db.py --init
+python scripts/db.py --check
+python scripts/load_logs.py --data-root "PATH_TO_INPUT_FOLDER" --load
+python scripts/db.py --file sql/ownership.sql
+python scripts/db.py --file sql/verify.sql
+python scripts/search_logs.py --setup
+python scripts/search_logs.py --dataset openstack --query error --limit 5
+```
+
+`PATH_TO_INPUT_FOLDER` contains `BGL/BGL.log` and the three files inside
+`OpenStack/`. Files can remain outside the repository. If your database is already
+loaded, skip the import: it deliberately refuses to duplicate existing rows.
+
+Optional CSV export (no database connection required):
+
+```sh
+python scripts/export_csv.py --data-root "PATH_TO_INPUT_FOLDER"
+```
+
+This writes `data/processed/bgl_full.csv` and `openstack_full.csv`, with headers
+matching the shared schema. Choose a new `--output-dir` for another export;
+existing exports are not overwritten. Null values become empty CSV fields;
+booleans are `True`/`False`. The supported database import reads raw logs directly.
+
+## Files
+
+| Path | Purpose |
 |---|---|
-| `compose.yaml` | Pinned SereneDB image and persistent storage |
-| `scripts/init_db.py` | Creates a separate `logbase` database |
-| `scripts/load_logs.py` | Validates raw files and optionally imports all records |
-| `scripts/docker_db.py` | Docker/psql connection and streaming COPY |
-| `scripts/check_import.py` | Small real-server round-trip test |
-| `scripts/run_sql.py` | Runs trusted repository SQL files |
-| `sql/schema.sql` | Shared full-corpus tables |
-| `sql/load.sql` | Optional structured samples, in separate sample tables |
-| `sql/verify.sql` | Full-corpus counts, dates, duplicate identities |
-| `sql/verify_samples.sql` | Checks optional samples |
+| `scripts/db.py` | Both connection adapters, initialization, connection check and SQL execution |
+| `scripts/load_logs.py` | Single shared parser, full import and source/database verification |
+| `scripts/export_csv.py` | Optional CSV export using that same parser |
+| `scripts/search_logs.py` | Index setup and bounded full-text search with counts and evidence |
+| `scripts/check_import.py` | Small real-database round-trip check |
+| `sql/schema.sql` | The two full-corpus tables |
 | `sql/ownership.sql` | Fictional component ownership |
-| `tests/` | Offline parser tests |
+| `sql/verify.sql` | Counts, date ranges and duplicate evidence checks |
+| `compose.yaml` | Pinned SereneDB image, localhost port and persistent storage |
+| `tests/` | Offline regression tests |
 
-## Data contract
+## Shared data contract
 
-Use `bgl_logs` and `openstack_logs` in database `logbase`. Common fields:
-`source_file`, `line_id`, `event_time`, `level`, `component`, `content`, `raw_text`,
-`parse_ok`, `parse_error`, `event_id`, `event_template`, and `raw_text_base64`.
+Use `bgl_logs` and `openstack_logs`. Common fields: `source_file`, `line_id`,
+`event_time`, `level`, `component`, `content`, `raw_text`, `parse_ok`, `parse_error`,
+`event_id`, `event_template`, `raw_text_base64`.
 
-Evidence identity is **dataset + source_file + line_id**. One row is a physical
-input line, not an incident. Original text is retained except the line terminator.
-For records containing null bytes, `raw_text` and `content` show the printable
-sequence `\u0000`; `raw_text_base64` preserves the exact original UTF-8 text.
-This avoids truncation by text clients. That field is null on ordinary records.
-Malformed headers are kept with `parse_ok=false`. Time/component queries can
-exclude these rows, but answers must state the limitation.
+Evidence identity is **dataset + source_file + line_id**. A row is a physical
+input line, not an incident. Timestamps retain source wall-clock time without
+inventing a timezone. BGL and OpenStack cover different years.
 
-`event_time` preserves displayed source time, with no invented timezone. BGL
-retains `epoch_seconds`, `label`, `node`, `log_type`. OpenStack retains `log_record`,
-`pid`, `correlation_data`, `request_id`, `instance_id`. Its initial bracketed
-context remains in `content` and is also extracted into `correlation_data`.
+Malformed headers remain with `parse_ok=false`. Records containing null bytes
+show `\u0000` in readable text; `raw_text_base64` preserves the exact original
+UTF-8 line. Other originals retain their text except the line terminator.
+BGL also retains `epoch_seconds`, `label`, `node`, `log_type`. OpenStack retains
+`log_record`, `pid`, `correlation_data`, `request_id`, `instance_id`; initial
+bracketed context remains in `content`. `event_id`/`event_template` remain null
+until a deliberate pattern-extraction step is added.
 
-Full-data `event_id` and `event_template` remain null until pattern extraction is
-implemented. Dataset labels and normal/abnormal filenames do not prove causes.
-BGL and OpenStack cover different years; do not treat them as simultaneous.
+Ownership joins on `(dataset, component)`. Teams are fictional; unmatched
+components should appear as `Unassigned`. Labels and filenames do not prove causes.
 
-Join `component_ownership` on `(dataset, component)`. Team names are explicitly
-fictional. Use a left join and show unmatched components as `Unassigned`.
+Search outputs include the executed SQL, total matches, bounded evidence and a
+truncation flag. `content_preview` is limited to 500 characters; retrieve complete
+evidence by source identity when needed. Time filters use source-local ISO dates,
+inclusive `--since` and exclusive `--until`. Full-text tokens differ from substring
+matching, so no misleading substring-versus-token speedup is claimed.
 
-## Validation
+## Tests
 
 ```sh
 python -m unittest discover -s tests -v
 python scripts/check_import.py
-python scripts/run_sql.py sql/verify.sql
 ```
 
-The last two commands require an initialized running database. Full import checks
-row/parsed counts, date ranges, severity totals and duplicate identities. Reports
-remain local under ignored `reports/`. Indexes, MCP tools and agent workflows are
-subsequent work.
+The second command needs the initialized database. The loader checks counts,
+severity totals, date ranges and unique source identities. Local reports go to
+ignored `reports/`. Raw logs, exports, environments and `.env` are not committed.
+
+## Contributions
+
+- Omar: shared schema, full-data parser/loader, evidence preservation, ownership,
+  verification, tests and unified setup.
+- Hazal: full-text dictionary/index/search workflow, adapted from `fts_demo.py`
+  on `hazal-loader` to the shared schema and both datasets.
+- Muneer: full-dataset CSV preparation/export approach, adapted from
+  `prepare_bgl.py` and `prepare_openstack.py` on `data-ingestion-muneer` to reuse
+  the shared parser. Original schema/sample work also forms the foundation.
+
+Only full-text search and CSV export are integrated from the teammate branches;
+their alternate loaders and additional annotation fields are not imported.
 
 Data source: Loghub (Zhu et al., ISSRE 2023; BGL also Oliner and Stearley, DSN 2007).
-Download full archives from the supplied dataset links. Do not commit raw data,
-virtual environments or secrets.

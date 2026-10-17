@@ -1,7 +1,7 @@
 import unittest
 import base64
 from scripts.load_logs import parse_line
-from scripts.docker_db import copy_value
+from scripts.db import copy_value
 
 
 class ParserTests(unittest.TestCase):
