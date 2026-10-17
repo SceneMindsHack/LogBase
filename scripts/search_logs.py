@@ -63,7 +63,10 @@ def search(dataset, query, limit, since=None, until=None, levels=None):
     count_sql, evidence_sql = query_sql(dataset, query, limit, since, until, levels)
     started = time.perf_counter()
     count = int(records(count_sql)[0]['matches'])
-    evidence = records(evidence_sql)
+    evidence = [
+        {'rank': rank, 'dataset': dataset, **row}
+        for rank, row in enumerate(records(evidence_sql), start=1)
+    ]
     return {'dataset': dataset, 'query': query, 'since_inclusive': since,
             'until_exclusive': until,
             'levels': list(dict.fromkeys(levels)) if levels is not None else None,
