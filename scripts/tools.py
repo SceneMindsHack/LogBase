@@ -17,6 +17,21 @@ try:
 except ImportError:
     from count_by_tool import count_by as _count_by
 
+try:
+    from .data_overview import overview as _overview
+except ImportError:
+    from data_overview import overview as _overview
+
+try:
+    from .search_logs import search as _search
+except ImportError:
+    from search_logs import search as _search
+
+try:
+    from .nearby_events import nearby as _nearby
+except ImportError:
+    from nearby_events import nearby as _nearby
+
 mcp = FastMCP("LogBase")
 
 
@@ -95,6 +110,71 @@ def count_by(dataset: str, dimension: str = "component",
     """
     return _count_by(dataset, dimension, since, until, levels, component, team,
                      text, limit)
+
+
+@mcp.tool()
+def data_overview(dataset: str = "all") -> dict:
+    """Summarize what data exists before searching or counting.
+
+    Call this first. Returns, per dataset, the row count, time range, parse and
+    timestamp-failure counts, source-file count, and the exact valid filter
+    values (levels, teams, components with owning team and row count). Use these
+    real values when calling the other tools instead of guessing. One row is one
+    physical log line, not an incident; this tool only reads data.
+
+    Args:
+        dataset: "all" (default), "bgl", or "openstack".
+    """
+    return _overview(dataset)
+
+
+@mcp.tool()
+def search(dataset: str, query: str, limit: int = 10,
+           since: str | None = None, until: str | None = None) -> dict:
+    """Full-text search returning a total match count and bounded evidence.
+
+    Full-text token matching on log content (not substring matching, and
+    separate from level/severity filtering). total_matches is the unlimited
+    count; limit bounds only the returned evidence rows. content_preview is
+    truncated to 500 characters.
+
+    Args:
+        dataset: "bgl" or "openstack".
+        query: Full-text query, 1 to 1000 characters.
+        limit: Max evidence rows returned, 1 to 100 (default 10).
+        since: Optional source-local ISO datetime, inclusive (no timezone offset).
+        until: Optional source-local ISO datetime, exclusive (no timezone offset).
+    """
+    return _search(dataset, query, limit, since, until)
+
+
+@mcp.tool()
+def nearby_events(dataset: str, window_minutes: int = 5, limit: int = 10,
+                  anchor_time: str | None = None, source_file: str | None = None,
+                  line_id: int | None = None, node: str | None = None,
+                  component: str | None = None, all_nodes: bool = False) -> dict:
+    """Show log lines before and after a chosen line, for context around an event.
+
+    Anchor either by time, or by (source_file, line_id). Returns lines within
+    +/- window_minutes of the anchor; if more than limit match, you get half from
+    each side, closest first. total_matches counts every line in the window;
+    truncated indicates some were omitted. For BGL, lines are limited to the
+    anchor's node unless all_nodes is set.
+
+    Args:
+        dataset: "bgl" or "openstack".
+        window_minutes: Minutes each side of the anchor, 1 to 1440 (default 5).
+        limit: Max rows returned, 2 to 100 (default 10), split before/after.
+        anchor_time: Source-local ISO datetime anchor (use this OR source_file+line_id).
+        source_file: Anchor by identity, with line_id.
+        line_id: Anchor by identity, with source_file.
+        node: Filter by node (bgl only).
+        component: Optional exact match on the component column.
+        all_nodes: On bgl identity anchoring, show all nodes instead of just the anchor's.
+    """
+    return _nearby(dataset, window_minutes, limit, anchor_time=anchor_time,
+                   source_file=source_file, line_id=line_id, node=node,
+                   component=component, all_nodes=all_nodes)
 
 
 if __name__ == "__main__":
