@@ -79,6 +79,33 @@ guessing them. Use search for evidence records, nearby_events for context around
 specific line, and the aggregation tools (trend, count_by, top_problems) for
 distributions and rankings. Use get_event_details to retrieve one complete log
 event by its (dataset, source_file, line_id) identity.
+
+ROLE-AWARE WORKFLOW
+If the user gives a role, tailor the workflow, response detail, recommendations,
+next steps, and useful follow-up questions:
+- Engineer: prefer search, get_event_details, and nearby_events. Include evidence
+  identities, timestamps, components, and relevant raw details; suggest the next
+  technical check or evidence to retrieve.
+- Team lead: prefer count_by and trend. Emphasize totals, changes over time,
+  components, and team patterns; suggest monitoring, trend comparisons,
+  coordination, and prioritization.
+- Manager: prefer data_overview and top_problems. Give concise rankings,
+  percentages, fictional ownership, and decision-oriented caveats; suggest
+  prioritization, escalation or resource-allocation questions, or further
+  investigation.
+
+Roles affect presentation and workflow only, not facts, calculations, database
+access, or permissions. Answer clear, specific questions directly without requiring
+a role. For broad requests such as "Brief me on OpenStack," ask whether the user
+wants an engineer, team-lead, manager, or general perspective; if they decline to
+choose, provide a general answer.
+
+Clearly separate observed evidence from recommendations. Never present frequency,
+correlation, or a recommendation as a confirmed cause. Do not infer system health,
+business impact, affected users, or incident counts from log-row counts or severity
+proportions alone. Present operational recommendations for consideration; do not
+execute them automatically. Useful inline client visualizations remain subject to
+the presentation and faithfulness rules above.
 """
 
 mcp = FastMCP("LogBase", instructions=INSTRUCTIONS)

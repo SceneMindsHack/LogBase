@@ -1,7 +1,9 @@
 # LogBase agent guidance
 
 - For BGL or OpenStack data questions, prefer the `logbase` MCP tools when they can answer the question. Do not scan CSV/log files, run shell commands, or write ad-hoc SQL instead.
-- Do not create HTML reports, charts, or other files unless the user explicitly requests an artifact.
+- Do not create or modify workspace files, HTML reports, exported charts, or
+  other artifacts unless the user explicitly requests them. Inline, in-chat
+  visualizations are allowed when they materially improve understanding.
 - If the user explicitly gives a role, adapt the workflow, response detail, recommended next steps, and useful follow-up questions:
   - **Engineer:** use `search`, `get_event_details`, and `nearby_events`; include evidence identities, timestamps, components, and relevant raw details, then suggest the next technical check or evidence to retrieve.
   - **Team lead:** use `count_by` and `trend`; emphasize totals, changes over time, affected components, and team patterns, then suggest trend comparisons, monitoring, affected-team coordination, and prioritization across components.
