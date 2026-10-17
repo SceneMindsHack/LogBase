@@ -7,6 +7,11 @@ try:
 except ImportError:
     from top_problems import top_problems as rank_top_problems
 
+try:
+    from .trend_tool import trend as _trend
+except ImportError:
+    from trend_tool import trend as _trend    
+
 mcp = FastMCP("LogBase")
 
 
@@ -39,6 +44,26 @@ def top_problems(
         text=text,
         top_n=top_n,
     )
+
+
+
+@mcp.tool()
+def trend(dataset: str, interval: str, start: str, end: str,
+          level: str | None = None, component: str | None = None) -> dict:
+    """Count matching log lines per day or week over a time range.
+
+    Reliable counts over time, not an anomaly detector. One row is one physical
+    log line, not an incident, request, or affected user.
+
+    Args:
+        dataset: "bgl" or "openstack".
+        interval: "day" or "week" (weeks start on Monday).
+        start: Source-local ISO datetime, inclusive (no timezone offset).
+        end: Source-local ISO datetime, exclusive (no timezone offset).
+        level: Optional exact match on the level column (e.g. "ERROR").
+        component: Optional exact match on the component column.
+    """
+    return _trend(dataset, interval, start, end, level, component)
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
