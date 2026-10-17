@@ -89,6 +89,30 @@ evidence by source identity when needed. Time filters use source-local ISO dates
 inclusive `--since` and exclusive `--until`. Full-text tokens differ from substring
 matching, so no misleading substring-versus-token speedup is claimed.
 
+## Role-aware agent usage
+
+Once the `logbase` MCP server is configured in a supported client, Codex,
+Claude Code and Kiro can use its tools conversationally.
+A clear question is answered directly; a broad request asks which perspective is
+desired. Roles change the workflow, level of detail, recommended next steps and
+useful follow-up questions, not the underlying facts, calculations, database
+access or permissions.
+
+| Request | Expected behavior |
+|---|---|
+| "What are the top five problems in the OpenStack logs?" | Answer directly with `top_problems`. |
+| "Brief me on OpenStack." | Ask whether the user wants an engineer, team-lead, manager or general perspective. |
+| "I'm an engineer; investigate authentication failures." | Search and retrieve exact evidence, then suggest the next technical check or nearby events to inspect. |
+| "I'm a team lead; assess authentication failures." | Compare counts and trends, then suggest monitoring, component priorities or affected-team coordination. |
+| "I'm a manager; brief me on OpenStack." | Give a concise overview and hotspot ranking, then suggest priorities, escalation questions or areas needing investigation. |
+
+A drill-down can remain conversational: "Search for authentication failures," then
+"Show details for result 2," then "Show what happened around that event." Search
+results are numbered and retain `dataset`, `source_file` and `line_id`, allowing the
+later requests to address the same evidence. Ownership mappings are fictional;
+log-row frequency or correlation does not prove distinct incidents, causation or
+root causes.
+
 ## MCP tool: `top_problems`
 
 `top_problems` gives managers a bounded ranking of operational log hotspots. It
