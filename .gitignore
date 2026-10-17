@@ -11,3 +11,6 @@ __pycache__/
 
 # Kiro
 .kiro/
+.env
+!.env.example
+reports/

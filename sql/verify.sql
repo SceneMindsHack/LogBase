@@ -4,7 +4,7 @@ SELECT
     MIN(event_time) AS first_event,
     MAX(event_time) AS last_event,
     SUM(CASE WHEN event_time IS NULL THEN 1 ELSE 0 END) AS invalid_timestamps,
-    COUNT(*) - COUNT(DISTINCT line_id) AS duplicate_line_ids
+    COUNT(*) - COUNT(DISTINCT (source_file, line_id)) AS duplicate_line_ids
 FROM bgl_logs
 
 UNION ALL
@@ -15,5 +15,5 @@ SELECT
     MIN(event_time),
     MAX(event_time),
     SUM(CASE WHEN event_time IS NULL THEN 1 ELSE 0 END),
-    COUNT(*) - COUNT(DISTINCT line_id)
+    COUNT(*) - COUNT(DISTINCT (source_file, line_id))
 FROM openstack_logs;

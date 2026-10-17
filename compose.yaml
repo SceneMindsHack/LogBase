@@ -1,0 +1,11 @@
+services:
+  serenedb:
+    container_name: serenedb
+    image: serenedb/serenedb@sha256:6d41ac6577e797289158786a2015ba8fbd6875feadb5c491518e166c011058c9
+    ports:
+      - "127.0.0.1:${SERENEDB_PORT:-7890}:7890"
+    volumes:
+      - serenedb-data:/var/lib/serenedb
+      - ./data:/data:ro
+volumes:
+  serenedb-data:
