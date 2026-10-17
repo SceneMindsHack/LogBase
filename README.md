@@ -100,17 +100,4 @@ The second command needs the initialized database. The loader checks counts,
 severity totals, date ranges and unique source identities. Local reports go to
 ignored `reports/`. Raw logs, exports, environments and `.env` are not committed.
 
-## Contributions
-
-- Omar: shared schema, full-data parser/loader, evidence preservation, ownership,
-  verification, tests and unified setup.
-- Hazal: full-text dictionary/index/search workflow, adapted from `fts_demo.py`
-  on `hazal-loader` to the shared schema and both datasets.
-- Muneer: full-dataset CSV preparation/export approach, adapted from
-  `prepare_bgl.py` and `prepare_openstack.py` on `data-ingestion-muneer` to reuse
-  the shared parser. Original schema/sample work also forms the foundation.
-
-Only full-text search and CSV export are integrated from the teammate branches;
-their alternate loaders and additional annotation fields are not imported.
-
 Data source: Loghub (Zhu et al., ISSRE 2023; BGL also Oliner and Stearley, DSN 2007).
