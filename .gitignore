@@ -4,6 +4,9 @@ data/
 *.tar.gz
 *.log
 
+# Secrets / local env
+.env
+
 # Python
 .venv/
 __pycache__/
