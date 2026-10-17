@@ -41,15 +41,26 @@ PREVIEW_LIMIT = 500
 
 
 def anchor_from_identity(dataset, source_file, line_id):
-    columns = 'source_file, event_time' + (', node' if dataset in NODE_DATASETS else '')
+    columns = (f'source_file, line_id, event_time, level, component, '
+               f'LEFT(content, {PREVIEW_LIMIT}) AS content_preview'
+               + (', node' if dataset in NODE_DATASETS else ''))
     sql = (f'SELECT {columns} FROM {dataset}_logs '
-           f'WHERE source_file = {literal(source_file)} AND line_id = {literal(line_id)}')
+           f'WHERE source_file = {literal(source_file)} AND line_id = {literal(line_id)} '
+           f'ORDER BY source_file, line_id LIMIT 2')
     rows = records(sql)
     if not rows:
-        raise ValueError('No row for that source_file and line_id')
+        raise ValueError(
+            f'No log row found for {dataset}/{source_file}/{line_id}')
+    if len(rows) > 1:
+        raise RuntimeError(
+            'Duplicate log identity detected for '
+            f'{dataset}/{source_file}/{line_id}; expected exactly one row')
     row = rows[0]
     node = row.get('node') or None
-    return row['event_time'], node, row['source_file'], sql
+    evidence = {key: row.get(key) for key in (
+        'source_file', 'line_id', 'event_time', 'level', 'component',
+        'content_preview')}
+    return row['event_time'], node, row['source_file'], evidence, sql
 
 
 def validate(dataset, window_minutes, limit, node):
@@ -72,14 +83,32 @@ def parse_anchor_time(value):
     return parsed
 
 
-def side_sql(dataset, filters, side, half, anchor_literal):
+def _ordering_bound(side, anchor_literal, anchor_source_file=None,
+                    anchor_line_id=None):
+    """Partition rows around an anchor using the result ordering key."""
+    if anchor_source_file is None or anchor_line_id is None:
+        return ('event_time <= ' if side == 'before' else 'event_time > ') + anchor_literal
+
+    comparison = '<' if side == 'before' else '>'
+    file_literal = literal(anchor_source_file)
+    line_literal = literal(anchor_line_id)
+    return (
+        f'(event_time {comparison} {anchor_literal} OR '
+        f'(event_time = {anchor_literal} AND '
+        f'(source_file {comparison} {file_literal} OR '
+        f'(source_file = {file_literal} AND line_id {comparison} {line_literal}))))'
+    )
+
+
+def side_sql(dataset, filters, side, half, anchor_literal,
+             anchor_source_file=None, anchor_line_id=None):
     """One side of the anchor, ordered closest-first for selection."""
     if side == 'before':
-        bound = 'event_time <= ' + anchor_literal
         order = 'event_time DESC, source_file DESC, line_id DESC'
     else:
-        bound = 'event_time > ' + anchor_literal
         order = 'event_time ASC, source_file ASC, line_id ASC'
+    bound = _ordering_bound(
+        side, anchor_literal, anchor_source_file, anchor_line_id)
     where = ' AND '.join(filters + [bound])
     return (f'SELECT source_file, line_id, event_time, level, component, '
             f'LEFT(content, {PREVIEW_LIMIT}) AS content_preview FROM {dataset}_logs '
@@ -87,7 +116,7 @@ def side_sql(dataset, filters, side, half, anchor_literal):
 
 
 def query_sql(dataset, anchor_time, window_minutes, limit, node=None, component=None,
-              source_file=None):
+              source_file=None, anchor_line_id=None):
     window_minutes, limit = validate(dataset, window_minutes, limit, node)
     window = timedelta(minutes=window_minutes)
     low, high = anchor_time - window, anchor_time + window
@@ -103,10 +132,28 @@ def query_sql(dataset, anchor_time, window_minutes, limit, node=None, component=
     anchor_literal = literal(anchor_time)
     before_half = limit // 2
     after_half = limit - before_half
+    identity_anchor = source_file is not None and anchor_line_id is not None
+    count_where = ' AND '.join(filters)
+    if identity_anchor:
+        anchor_identity = (
+            f'source_file = {literal(source_file)} AND '
+            f'line_id = {literal(anchor_line_id)}')
+        # The anchor is always part of identity-based output, even when optional
+        # context filters do not match it. Count it once alongside filtered context.
+        count_where = (
+            f'({anchor_identity}) OR '
+            f'(({count_where}) AND NOT ({anchor_identity}))')
+        # The old split counted the anchor in the before half. Reserve that slot
+        # explicitly so the maximum returned row count and side balance stay stable.
+        before_half -= 1
     count = (f'SELECT COUNT(*) AS matches FROM {dataset}_logs '
-             f'WHERE {" AND ".join(filters)}')
-    before = side_sql(dataset, filters, 'before', before_half, anchor_literal)
-    after = side_sql(dataset, filters, 'after', after_half, anchor_literal)
+             f'WHERE {count_where}')
+    before = side_sql(dataset, filters, 'before', before_half, anchor_literal,
+                      source_file if identity_anchor else None,
+                      anchor_line_id if identity_anchor else None)
+    after = side_sql(dataset, filters, 'after', after_half, anchor_literal,
+                     source_file if identity_anchor else None,
+                     anchor_line_id if identity_anchor else None)
     return count, before, after
 
 
@@ -120,12 +167,13 @@ def nearby(dataset, window_minutes, limit, anchor_time=None, source_file=None,
     identity_sql = None
     anchor_file = None
     anchor_line = None
+    anchor_evidence = None
     if anchor_time is None:
         if source_file is None or line_id is None:
             raise ValueError('Provide --time, or both --source-file and --line-id')
         line_id = int(line_id)
-        anchor_time, found_node, anchor_file, identity_sql = anchor_from_identity(
-            dataset, source_file, line_id)
+        (anchor_time, found_node, anchor_file, anchor_evidence,
+         identity_sql) = anchor_from_identity(dataset, source_file, line_id)
         anchor_line = line_id
         if node is None and not all_nodes:
             node = found_node
@@ -135,18 +183,19 @@ def nearby(dataset, window_minutes, limit, anchor_time=None, source_file=None,
         anchor_time = parse_anchor_time(anchor_time)
 
     count_sql, before_sql, after_sql = query_sql(
-        dataset, anchor_time, window_minutes, limit, node, component, source_file=anchor_file)
+        dataset, anchor_time, window_minutes, limit, node, component,
+        source_file=anchor_file, anchor_line_id=anchor_line)
     started = time.perf_counter()
     total = int(records(count_sql)[0]['matches'])
     before_rows = records(before_sql)
     after_rows = records(after_sql)
     # Selection was closest-first per side; present the whole window in time order.
-    evidence = sorted(before_rows + after_rows,
+    if anchor_evidence is not None:
+        anchor_evidence['is_anchor'] = True
+        for row in before_rows + after_rows:
+            row['is_anchor'] = False
+    evidence = sorted(before_rows + ([anchor_evidence] if anchor_evidence else []) + after_rows,
                       key=lambda r: (r['event_time'], r['source_file'], int(r['line_id'])))
-    # Flag the anchor row itself when anchoring by identity.
-    for row in evidence:
-        if anchor_file is not None:
-            row['is_anchor'] = row['source_file'] == anchor_file and int(row['line_id']) == anchor_line
     sql = ([identity_sql] if identity_sql else []) + [count_sql, before_sql, after_sql]
     return {'dataset': dataset, 'anchor_time': anchor_time.isoformat(),
             'window_minutes': window_minutes, 'window_bounds_inclusive': True,
