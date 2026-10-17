@@ -15,8 +15,9 @@ except ImportError:
     from db import records, literal
 
 DATASETS = ('bgl', 'openstack')
-# Interval name -> (date_trunc keyword, verified Monday-start for 'week').
-INTERVALS = {'day': 'day', 'week': 'week'}
+# Interval name -> date_trunc keyword. 'week' is Monday-start; all verified
+# against the running SereneDB instance before use.
+INTERVALS = {'hour': 'hour', 'day': 'day', 'week': 'week'}
 MAX_BUCKETS = 400
 
 
@@ -31,7 +32,10 @@ def _parse_local(value, label):
 def _bucket_starts(interval, start, end):
     """Expected bucket starts covering [start, end), chronological, inclusive of
     the bucket containing start up to (excluding) end. Weeks start on Monday."""
-    if interval == 'day':
+    if interval == 'hour':
+        current = start.replace(minute=0, second=0, microsecond=0)
+        step = lambda d: d + timedelta(hours=1)
+    elif interval == 'day':
         current = start.replace(hour=0, minute=0, second=0, microsecond=0)
         step = lambda d: d + timedelta(days=1)
     else:  # week, Monday-start

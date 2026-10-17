@@ -23,6 +23,12 @@ class TrendSqlTests(unittest.TestCase):
         self.assertIn("date_trunc('week', event_time)", bucket_sql)
         self.assertIn('FROM bgl_logs', bucket_sql)
 
+    def test_sql_shape_hour_keyword(self):
+        _, bucket_sql = query_sql(
+            'openstack', 'hour', '2017-05-16T09:00:00', '2017-05-16T12:00:00')
+        self.assertIn("date_trunc('hour', event_time)", bucket_sql)
+        self.assertIn('FROM openstack_logs', bucket_sql)
+
     def test_filters_are_quoted(self):
         _, bucket_sql = query_sql(
             'bgl', 'day', '2005-06-01T00:00:00', '2005-06-02T00:00:00',
@@ -72,6 +78,20 @@ class TrendValidationTests(unittest.TestCase):
 
 
 class BucketStartTests(unittest.TestCase):
+    def test_hourly_buckets_inclusive_start_exclusive_end(self):
+        starts = _bucket_starts('hour', datetime(2017, 5, 16, 9, 0),
+                                datetime(2017, 5, 16, 12, 0))
+        self.assertEqual([d.isoformat() for d in starts],
+                         ['2017-05-16T09:00:00', '2017-05-16T10:00:00',
+                          '2017-05-16T11:00:00'])
+
+    def test_partial_first_hour_included(self):
+        # start mid-hour snaps back to the top of that hour.
+        starts = _bucket_starts('hour', datetime(2017, 5, 16, 9, 37),
+                                datetime(2017, 5, 16, 10, 15))
+        self.assertEqual([d.isoformat() for d in starts],
+                         ['2017-05-16T09:00:00', '2017-05-16T10:00:00'])
+
     def test_daily_buckets_inclusive_start_exclusive_end(self):
         starts = _bucket_starts('day', datetime(2017, 5, 14),
                                 datetime(2017, 5, 17))
@@ -124,6 +144,17 @@ class ZeroFillTests(unittest.TestCase):
             {'bucket_start': '2017-05-14T00:00:00', 'count': 18434},
             {'bucket_start': '2017-05-15T00:00:00', 'count': 0},
             {'bucket_start': '2017-05-16T00:00:00', 'count': 123381},
+        ])
+
+    def test_hourly_missing_buckets_filled_with_zero(self):
+        observed = [{'bucket': '2017-05-16 09:00:00', 'count': '40'},
+                    {'bucket': '2017-05-16 11:00:00', 'count': '7'}]
+        filled = _zero_fill('hour', datetime(2017, 5, 16, 9, 0),
+                            datetime(2017, 5, 16, 12, 0), observed)
+        self.assertEqual(filled, [
+            {'bucket_start': '2017-05-16T09:00:00', 'count': 40},
+            {'bucket_start': '2017-05-16T10:00:00', 'count': 0},
+            {'bucket_start': '2017-05-16T11:00:00', 'count': 7},
         ])
 
     def test_empty_observed_is_all_zero(self):
