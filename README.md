@@ -89,6 +89,40 @@ evidence by source identity when needed. Time filters use source-local ISO dates
 inclusive `--since` and exclusive `--until`. Full-text tokens differ from substring
 matching, so no misleading substring-versus-token speedup is claimed.
 
+## MCP tool: `top_problems`
+
+`top_problems` gives managers a bounded ranking of operational log hotspots. It
+counts physical log rows, not distinct incidents, and frequency or correlation does
+not prove a root cause.
+
+| Parameter | Meaning |
+|---|---|
+| `dataset` | Required: `bgl` or `openstack` |
+| `group_by` | `component` (default) or fictional owner `team` |
+| `since`, `until` | Optional source-local ISO bounds; inclusive then exclusive |
+| `levels` | Optional non-empty exact list; defaults to `FATAL`, `WARNING`, `SEVERE`, `ERROR`, `FAILURE`, `WARN`, and `CRITICAL` |
+| `component`, `team` | Optional non-blank exact filters |
+| `text` | Optional full-text filter; requires the existing full-text indexes to be initialized |
+| `top_n` | Number of groups to return, from 1 to 50; default 10 |
+
+Component example:
+
+```json
+{"dataset":"openstack","group_by":"component","levels":["ERROR"],"since":"2017-05-16","until":"2017-05-17","top_n":5}
+```
+
+Team example:
+
+```json
+{"dataset":"bgl","group_by":"team","levels":["FATAL","ERROR"],"top_n":10}
+```
+
+The result reports normalized `filters`, `counted_metric`, `total_matching_rows`,
+`returned`, `truncated`, ranked `results` with percentages, the exact executed
+`sql`, and `elapsed_seconds`. `ownership_is_fictional` and `caveat` make the
+demonstration-only ownership and causation limits explicit. Unmapped components
+belong to `Unassigned`.
+
 ## Tests
 
 ```sh
