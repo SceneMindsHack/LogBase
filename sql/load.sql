@@ -1,4 +1,5 @@
-CREATE OR REPLACE TABLE bgl_logs AS
+-- Optional structured samples ONLY. These never replace full-corpus tables.
+CREATE OR REPLACE TABLE sample_bgl_logs AS
 SELECT
     "LineId" AS line_id,
     try_strptime("Time", '%Y-%m-%d-%H.%M.%S.%f') AS event_time,
@@ -12,7 +13,7 @@ SELECT
     "EventTemplate" AS event_template
 FROM read_csv('/data/BGL_2k.log_structured.csv');
 
-CREATE OR REPLACE TABLE openstack_logs AS
+CREATE OR REPLACE TABLE sample_openstack_logs AS
 SELECT
     "LineId" AS line_id,
     "Date" + "Time" AS event_time,
