@@ -88,6 +88,12 @@ find words over-represented in a chosen period versus a baseline period; before
 trusting a term, check coverage with data_overview, pick comparable windows, and
 retrieve representative records with search before claiming what a term means.
 
+Search results have stable one-based ranks for their returned order. Preserve the
+mapping from every displayed result number to its (dataset, source_file, line_id)
+identity. For a follow-up such as "show details for result 2," use the identity from
+rank 2 with get_event_details, or with nearby_events for surrounding context. Do not
+guess from a timestamp or rely on server-side conversational state.
+
 ROLE-AWARE WORKFLOW
 If the user gives a role, tailor the workflow, response detail, recommendations,
 next steps, and useful follow-up questions:
@@ -257,7 +263,9 @@ def search(dataset: str, query: str, limit: int = 10,
     Full-text token matching on log content (not substring matching). Level
     filtering is a separate exact match on the level column, applied in addition
     to the full-text query. total_matches is the unlimited count; limit bounds
-    only the returned evidence rows. content_preview is truncated to 500 characters.
+    only the returned evidence rows. Each evidence row includes a one-based rank and
+    its dataset, source_file, and line_id. content_preview is truncated to 500
+    characters.
 
     Args:
         dataset: "bgl" or "openstack".
@@ -267,13 +275,14 @@ def search(dataset: str, query: str, limit: int = 10,
         until: Optional source-local ISO datetime, exclusive (no timezone offset).
         levels: Optional non-empty list of exact levels to restrict to (e.g. ["FATAL"]).
 
-    Presentation: Present a bounded set of evidence records, each with dataset, source
-    file, line identifier, timestamp, and the message preview where available. Clearly
-    distinguish total_matches from the number of returned records, and state when
-    evidence or previews are truncated. Do not graph this handful of examples as if it
-    were the distribution of all matches; use an aggregation tool for a distribution
-    question. Keep text search for "error" distinct from filtering level "ERROR". Use
-    only the real returned identities; do not fabricate clickable source links.
+    Presentation: Display each returned rank as its result number and preserve its
+    mapping to dataset, source_file, and line_id. A follow-up such as "result 2" must
+    use rank 2's retained identity with get_event_details or nearby_events. Present
+    timestamps and message previews where available. Clearly distinguish total_matches
+    from the number returned, and state when evidence or previews are truncated. Do not
+    graph this sample as the distribution of all matches; use an aggregation tool for
+    that. Keep text search for "error" distinct from level "ERROR". Never fabricate
+    identities or clickable source links.
     """
     return _search(dataset, query, limit, since, until, levels)
 
