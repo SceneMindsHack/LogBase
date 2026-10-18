@@ -1,4 +1,5 @@
 # Data (too big, and not allowed in the public repo)
+input-data/
 data/
 *.zip
 *.tar.gz

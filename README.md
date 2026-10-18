@@ -38,7 +38,7 @@ Create the environment, install the three dependencies, and copy the default
 **Windows (PowerShell)**
 
 ```powershell
-py -3.12 -m venv .venv
+py -3.12 -m venv .venv          # if `py` isn't found: python -m venv .venv (needs Python 3.12)
 .\.venv\Scripts\Activate.ps1    # if blocked: Set-ExecutionPolicy -Scope Process RemoteSigned
 python -m pip install -r requirements.txt
 Copy-Item .env.example .env
@@ -108,7 +108,8 @@ codex mcp add logbase -- .venv\Scripts\python.exe scripts\tools.py  # Windows
 ```
 
 For other clients, add this stdio server to their MCP config, replacing
-`ABSOLUTE_PATH_TO_REPO` with your checkout path:
+`ABSOLUTE_PATH_TO_REPO` with your checkout path. On Windows, use
+`.venv/Scripts/python.exe` instead of `.venv/bin/python`:
 
 ```json
 {
