@@ -108,7 +108,7 @@ class SearchOutputContractTests(unittest.TestCase):
     def test_mcp_guidance_preserves_rank_identity_mapping(self):
         from scripts import tools
 
-        self.assertIn('stable one-based ranks', tools.INSTRUCTIONS)
+        self.assertIn('search rank', tools.INSTRUCTIONS)
         self.assertIn('(dataset, source_file, line_id)', tools.INSTRUCTIONS)
         self.assertIn('get_event_details', tools.search.__doc__)
         self.assertIn('nearby_events', tools.search.__doc__)

@@ -170,7 +170,7 @@ class RegistrationUnchangedTests(unittest.TestCase):
         from scripts import tools
         instr = tools.mcp._mcp_server.instructions
         self.assertIn("INVESTIGATION RECAP", instr)
-        self.assertIn("ROLE-AWARE WORKFLOW", instr)   # existing section preserved
+        self.assertIn("ROLE-AWARE ANSWERS", instr)   # role guidance section preserved
         self.assertIn("PRESENTATION", instr)
 
 
