@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from scripts.search_logs import search
+from scripts.search_logs import search, query_sql
 
 
 def evidence_row(source_file, line_id, event_time):
@@ -93,6 +93,17 @@ class SearchOutputContractTests(unittest.TestCase):
         self.assertEqual(result['content_preview_limit'], 500)
         self.assertTrue(result['sql'][1].endswith('LIMIT 2'))
         json.dumps(result)
+
+    def test_query_uses_websearch_parser_for_both_statements(self):
+        count_sql, evidence_sql = query_sql('openstack', 'disk info')
+        for statement in (count_sql, evidence_sql):
+            self.assertIn("websearch_to_tsquery('disk info')", statement)
+        # The raw string is parsed by the database, not matched directly.
+        self.assertNotIn("content @@ 'disk info'", count_sql)
+
+    def test_query_value_is_safely_quoted(self):
+        count_sql, _ = query_sql('openstack', "it's a trap")
+        self.assertIn("websearch_to_tsquery('it''s a trap')", count_sql)
 
     def test_mcp_guidance_preserves_rank_identity_mapping(self):
         from scripts import tools

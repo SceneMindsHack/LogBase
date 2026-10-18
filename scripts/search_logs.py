@@ -34,7 +34,9 @@ def query_sql(dataset, query, limit=10, since=None, until=None, levels=None):
         raise ValueError('Limit must be between 1 and 100')
     if not query.strip() or len(query) > 1000:
         raise ValueError('Query must contain 1 to 1000 characters')
-    filters = ['content @@ ' + literal(query)]
+    # websearch_to_tsquery parses the query string in the database: bare words
+    # are ANDed, "quoted text" is a phrase, and a leading - excludes a term.
+    filters = ['content @@ websearch_to_tsquery(' + literal(query) + ')']
     if levels is not None:
         if not isinstance(levels, list) or not levels:
             raise ValueError('levels must be a non-empty list when provided')
