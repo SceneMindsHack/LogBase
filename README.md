@@ -3,6 +3,9 @@
 Load, verify, export and search BGL/OpenStack logs in SereneDB. One shared parser
 and schema serve both datasets. MCP tools and agent workflows are the next layer.
 
+For a deep explanation of the project, the architecture and every tool, see
+[docs/documentation.md](docs/documentation.md).
+
 ## Choose a connection
 
 Copy `.env.example` to `.env`. Every Python command below reads this same file.
@@ -173,6 +176,10 @@ log-row frequency or correlation does not prove distinct incidents, causation or
 root causes.
 
 ## Tool catalog
+
+This is a quick reference. For a per-tool deep dive with full parameter tables,
+examples and returned-field descriptions, see
+[docs/documentation.md](docs/documentation.md).
 
 LogBase exposes eight read-only tools over MCP. All of them share these rules:
 
