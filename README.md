@@ -172,76 +172,72 @@ later requests to address the same evidence. Ownership mappings are fictional;
 log-row frequency or correlation does not prove distinct incidents, causation or
 root causes.
 
-## MCP tool: `top_problems`
+## Tool catalog
 
-`top_problems` gives managers a bounded ranking of operational log hotspots. It
-counts physical log rows, not distinct incidents, and frequency or correlation does
-not prove a root cause.
+LogBase exposes eight read-only tools over MCP. All of them share these rules:
 
-| Parameter | Meaning |
-|---|---|
-| `dataset` | Required: `bgl` or `openstack` |
-| `group_by` | `component` (default) or fictional owner `team` |
-| `since`, `until` | Optional source-local ISO bounds; inclusive then exclusive |
-| `levels` | Optional non-empty exact list; defaults to `FATAL`, `WARNING`, `SEVERE`, `ERROR`, `FAILURE`, `WARN`, and `CRITICAL` |
-| `component`, `team` | Optional non-blank exact filters |
-| `text` | Optional full-text filter; requires the existing full-text indexes to be initialized |
-| `top_n` | Number of groups to return, from 1 to 50; default 10 |
+- Every result includes the executed `sql` and `elapsed_seconds`. Tools that bound their output also return the total count and a `truncated` flag, so a limited result is never mistaken for the full picture.
+- Counts are physical log lines, not incidents, and frequency does not prove a cause.
+- Team names come from a fictional ownership table. Unmapped components count as `Unassigned`.
+- Timestamps are source-local ISO strings with no timezone. Start bounds are inclusive and end bounds are exclusive.
+- BGL (2005 to 2006) and OpenStack (2017) cover different periods and are never merged.
 
-Component example:
+| Tool | What it does | Key inputs | Returns |
+|---|---|---|---|
+| `data_overview` | Shows what data exists. Call it first. | `dataset` (default `all`) | Row counts, time range, parse failures, valid levels, teams and components |
+| `search` | Full-text search on log content | `dataset`, `query`, `limit`, `since`, `until`, `levels` | `total_matches`, ranked evidence rows |
+| `nearby_events` | Lines before and after a chosen line | `dataset`, anchor (`anchor_time` or `source_file` + `line_id`), `window_minutes`, `limit`, `node`, `component`, `all_nodes` | Window lines in time order, anchor flagged |
+| `get_event_details` | One complete log event | `dataset`, `source_file`, `line_id` | All fields, raw evidence, fictional owning team |
+| `trend` | Line counts per hour, day or week | `dataset`, `interval`, `start`, `end`, `level`, `component` | Zero-filled buckets in chronological order |
+| `count_by` | Exact counts per group over the whole dataset | `dataset`, `dimension` (component, team or severity), filters, `limit` | Ranked groups with counts and percentages |
+| `top_problems` | Ranks hotspots by component or team | `dataset`, `group_by`, filters, `top_n` | Ranked groups with counts and percentages |
+| `distinctive_terms` | Words over-represented in one period compared with a baseline | `dataset`, foreground and baseline windows, filters, `top_n` | Terms with document counts, shares and change |
+
+**Which tools each role typically uses.** Roles change the workflow and the recommendations, not access or facts.
+
+- Engineer: `search`, `get_event_details`, `nearby_events`
+- Team lead: `count_by`, `trend`, `distinctive_terms`
+- Manager: `data_overview`, `top_problems`, `count_by`
+
+### Things worth knowing
+
+- **`search`** matches whole words, not substrings, and the word "error" is not the same as level `ERROR`. Use `levels` for the level. Each evidence row has a one-based `rank` plus its `dataset`, `source_file` and `line_id`, so "show result 2" can be resolved with `get_event_details` or `nearby_events`. `limit` is 1 to 100, and `content_preview` is cut at 500 characters.
+- **`nearby_events`** returns half of `limit` from each side of the anchor, closest first, while `total_matches` counts the whole window. On BGL, anchoring by line limits results to that line's node unless `all_nodes` is set. Time proximity does not prove causation.
+- **`trend`** zero-fills empty buckets, and the first and last buckets may be partial. `start` and `end` are required.
+- **`count_by` and `top_problems`** report the full denominator in `total_matching_rows`. `count_by` groups by `dimension` (`component`, `team` or `severity`); `top_problems` groups by `group_by` (`component` or `team`). Both accept an optional `text` full-text filter (which needs the indexes built). `top_problems` defaults to the problem levels `FATAL`, `WARNING`, `SEVERE`, `ERROR`, `FAILURE`, `WARN` and `CRITICAL`, and an explicit `levels` list overrides that. `top_n` is 1 to 50.
+- **`distinctive_terms`** compares document frequency (records containing a term) between two non-overlapping windows. `min_foreground_docs` (default 5) sets the minimum foreground support, and `exclude_terms` drops extra terms on top of a small default list. Each term reports its foreground and baseline document counts, both shares, `share_change_pp`, and `ratio` (null when the term is absent from the baseline, flagged by `new_in_baseline_comparison`). It suggests leads, not causes, and its score is a heuristic, not a significance test. `status` is `ok`, `no_distinctive_terms` or `insufficient_data`. It reflects the full-text index as last refreshed by `scripts/search_logs.py --setup`.
+
+### Examples
+
+`search`:
+
+```json
+{"dataset":"openstack","query":"error","levels":["ERROR"],"limit":5}
+```
+
+`nearby_events`:
+
+```json
+{"dataset":"openstack","source_file":"openstack_normal1.log","line_id":27179,"window_minutes":1,"limit":4}
+```
+
+`count_by`:
+
+```json
+{"dataset":"bgl","dimension":"team","limit":5}
+```
+
+`top_problems`:
 
 ```json
 {"dataset":"openstack","group_by":"component","levels":["ERROR"],"since":"2017-05-16","until":"2017-05-17","top_n":5}
 ```
 
-Team example:
-
-```json
-{"dataset":"bgl","group_by":"team","levels":["FATAL","ERROR"],"top_n":10}
-```
-
-The result reports normalized `filters`, `counted_metric`, `total_matching_rows`,
-`returned`, `truncated`, ranked `results` with percentages, the exact executed
-`sql`, and `elapsed_seconds`. `ownership_is_fictional` and `caveat` make the
-demonstration-only ownership and causation limits explicit. Unmapped components
-belong to `Unassigned`.
-
-## MCP tool: `distinctive_terms`
-
-`distinctive_terms` answers "what words became unusually common during this period
-compared with a baseline?" It uses SereneDB's native inverted-index term dictionary
-(`ts_dict_agg(content)` and `ts_dict_count(content)`) to count, per term, how many
-records contain it. This is document frequency: a line containing a word several
-times counts once for that term. All counting happens in the database.
-
-| Parameter | Meaning |
-|---|---|
-| `dataset` | Required: `bgl` or `openstack` |
-| `foreground_start`, `foreground_end` | Required source-local ISO bounds, inclusive then exclusive |
-| `baseline_start`, `baseline_end` | Required baseline window; must not overlap the foreground (adjacent is allowed) |
-| `component` | Optional exact component filter, applied to both windows |
-| `levels` | Optional non-empty exact level list, applied to both windows (all levels if omitted) |
-| `min_foreground_docs` | Minimum foreground support, positive; default 5 |
-| `top_n` | Number of terms to return, 1 to 50; default 10 |
-| `exclude_terms` | Optional extra exact terms to drop, added to a small default list |
-
-Example (compare two OpenStack hours on a day with data):
+`distinctive_terms`:
 
 ```json
 {"dataset":"openstack","foreground_start":"2017-05-16T00:00:00","foreground_end":"2017-05-16T01:00:00","baseline_start":"2017-05-16T01:00:00","baseline_end":"2017-05-16T02:00:00","min_foreground_docs":20,"top_n":5}
 ```
-
-For each term the result gives `foreground_docs`, `baseline_docs`, both shares
-(0-1 proportions of eligible records), `share_change_pp`, `excess_documents`
-(`foreground_docs - foreground_total * baseline_share`), `ratio` (null when the
-term is absent from the baseline, with `new_in_baseline_comparison` true), and
-window denominators. `method` names the native functions and the score definition.
-The score orders terms by over-representation; it is a transparent heuristic, not a
-p-value. Shares are proportions of log records, not failure rates, and terms are
-investigative leads, not proven causes. `status` is `ok`, `no_distinctive_terms`,
-or `insufficient_data` (a window with no eligible records). Eligible records are
-timed rows with non-null content matching the filters. Results reflect the index
-as last refreshed by `scripts/search_logs.py --setup`.
 
 ## Tests
 
