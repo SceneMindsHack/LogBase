@@ -167,10 +167,17 @@ calculations or database access, which stay identical for everyone.
 | **Team lead** | Totals, trends and recurring-component patterns to coordinate around | `count_by`, `trend`, `distinctive_terms` |
 | **Manager** | Concise hotspot rankings, ownership and decision-oriented tradeoffs | `data_overview`, `top_problems`, `count_by` |
 
-A clear, specific question is answered directly; a broad request ("Brief me on
-OpenStack") first asks which perspective is wanted. Throughout, observed evidence
-stays separate from recommendations, and frequency or correlation is never
-presented as a confirmed cause.
+How the agent decides on a perspective:
+
+- If the user states their role, the response is tailored to it.
+- If the request is specific enough, the agent answers directly, at the right
+  level of detail, without asking for a role.
+- If the request is broad and a role would materially change the answer, the agent
+  asks whether the user is an engineer, team lead, or manager.
+- The agent never asks for a role when it is unnecessary.
+
+Throughout, observed evidence stays separate from recommendations, and frequency or
+correlation is never presented as a confirmed cause.
 
 
 
@@ -187,6 +194,20 @@ presented as a confirmed cause.
 
 For the full architecture, per-tool reference and these features in depth, see
 [docs/documentation.md](docs/documentation.md).
+
+
+## Limitations
+
+- **No feedback loop to validate insights.** We work with static logs and no access
+  to the live systems behind them, so the agent can suggest a fix but we cannot
+  apply it and re-read the logs to confirm it worked. A practical evaluation loop
+  would have measured how good the insights really are.
+- **Conversation-scoped recaps.** Investigation recaps are built from retained
+  conversation context, not a durable store; if history is compacted or the session
+  restarts, the agent discloses the gap rather than reconstructing it.
+- **Model-dependent presentation.** The server guides the agent (auto-charting,
+  role-aware answers, recaps), but actual behavior — chart rendering especially —
+  depends on the MCP client and model.
 
 
 ## Tests
