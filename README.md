@@ -246,6 +246,30 @@ LogBase exposes eight read-only tools over MCP. All of them share these rules:
 {"dataset":"openstack","foreground_start":"2017-05-16T00:00:00","foreground_end":"2017-05-16T01:00:00","baseline_start":"2017-05-16T01:00:00","baseline_end":"2017-05-16T02:00:00","min_foreground_docs":20,"top_n":5}
 ```
 
+## Provenance and investigation recaps
+
+Every tool result includes a `provenance` field recording the actual call: a
+unique `call_id`, the tool name, the resolved `arguments` (including defaults),
+UTC `started_at`/`completed_at` timestamps, and the exact executed SQL under
+`queries` (in execution order; `data_overview`'s per-dataset statements are
+flattened and tagged by dataset). This is additive execution provenance surfaced
+to the client, not a tamper-proof audit log. Execution times are UTC; log-event
+times stay source-local — they are different clocks. A failed call raises and
+receives no provenance; no success is fabricated.
+
+The provenance helper lives in `scripts/provenance.py` and is invoked by the thin
+MCP wrappers in `scripts/tools.py`; tool signatures, descriptions, and existing
+output fields are unchanged.
+
+At a meaningful stopping point the agent may offer a one-time **investigation
+recap**: a short narrative of the investigation, the full cited log evidence (via
+`get_event_details`, with field headers and complete `raw_text`), any relevant
+charts, conclusions and next steps, and an appendix grouping the executed queries
+by tool using these `call_id`s. The recap is opt-in and composed from retained
+conversation results; it is conversation-scoped, not a durable store, so missing
+history is disclosed rather than reconstructed. See `AGENTS.md` for the behavior
+guidance.
+
 ## Tests
 
 ```sh

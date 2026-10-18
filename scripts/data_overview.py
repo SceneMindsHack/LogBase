@@ -115,7 +115,7 @@ def overview_one(dataset):
         'teams': [{'team': r['team'], 'count': int(r['count'])} for r in teams],
         'components': [{'component': r['component'] or None, 'team': r['team'],
                         'count': int(r['count'])} for r in components],
-        'sql': [scope_q, levels_q, teams_q, components_q],
+        'sql': [scope_q, levels_q, components_q, teams_q],
     }
 
 
