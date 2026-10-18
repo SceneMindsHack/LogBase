@@ -5,6 +5,12 @@ answers. An AI agent calls a set of read-only MCP tools that search and aggregat
 inside SereneDB and return only bounded evidence or exact counts — never the raw
 corpus.
 
+<p align="center">
+  <img src="docs/images/demo-1-top-team.png" alt="Ranking teams by problem-level log volume" width="32%" />
+  <img src="docs/images/demo-2-severity-breakdown.png" alt="Severity breakdown for a team" width="32%" />
+  <img src="docs/images/demo-3-fatal-over-time.png" alt="FATAL records charted over time" width="32%" />
+</p>
+
 
 
 
