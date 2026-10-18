@@ -180,6 +180,9 @@ How the agent decides on a perspective:
 Throughout, observed evidence stays separate from recommendations, and frequency or
 correlation is never presented as a confirmed cause.
 
+For a real transcript of an engineer, team lead and manager investigating the same
+BGL FATAL logs, see [docs/worked-investigation-bgl.md](docs/worked-investigation-bgl.md).
+
 
 
 
