@@ -27,9 +27,10 @@ def _extract_queries(result):
     """Pull the exact executed SQL out of a tool result into provenance queries.
 
     Handles the field shapes actually used by LogBase tools:
-      - top-level "sql" as a string (count_by, top_problems, get_event_details,
-        distinctive_terms)
-      - top-level "sql" as a list of strings (trend, search, nearby_events)
+      - top-level "sql" as a string (count_by, top_problems, get_event_details)
+      - top-level "sql" as a list of strings (trend, search, nearby_events, and
+        distinctive_terms, which runs its main query plus a separate denominator
+        query)
       - data_overview: no top-level "sql"; each item of "datasets" carries its own
         "sql" list, tagged with that dataset.
     Order is preserved as the tool reported it. A tool that returns no SQL (an

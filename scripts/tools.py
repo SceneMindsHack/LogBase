@@ -156,8 +156,10 @@ supposedly exact trail from memory or invent numbers, SQL, or visuals. Structure
 4. Tools and queries appendix: each tool name once as a heading in first-use order;
    under it, each relevant call in execution order with its call_id, actual
    arguments, and exact SQL in fenced blocks. Show every distinct execution
-   (including failures that affected reasoning, labeled as such, with SQL only when
-   actually available). Identical statements with identical values may appear once
+   (including failures that affected reasoning, labeled as such). A failed call
+   produces no provenance, so it has no call_id and no captured SQL: report it as a
+   failure and state that its id/SQL are unavailable. Never invent a call_id or SQL
+   for a failed call. Identical statements with identical values may appear once
    with all associated call_ids retained; never deduplicate parameterized queries on
    SQL text alone.
 
@@ -449,12 +451,17 @@ def distinctive_terms(dataset: str, foreground_start: str, foreground_end: str,
         foreground_end: Source-local ISO datetime, exclusive.
         baseline_start: Source-local ISO datetime, inclusive.
         baseline_end: Source-local ISO datetime, exclusive. Windows must not overlap
-            (adjacent is allowed).
+            (adjacent is allowed). Each window may span at most 24 hours; a longer
+            window is rejected with an error.
         component: Optional exact match on the component column, applied to both windows.
         levels: Optional non-empty list of exact levels, applied to both windows.
         min_foreground_docs: Minimum foreground document support, positive (default 5).
         top_n: Max terms returned, 1-50 (default 10).
         exclude_terms: Optional extra exact terms to exclude (added to a small default list).
+
+    If a window has fewer than 100 eligible records, the result adds a warning that
+    its document shares and rankings may be unstable (a practical interpretation
+    note, not a statistical guarantee).
 
     Presentation: By default, when valid multi-term results are returned, render a
     paired horizontal bar chart of foreground vs baseline document shares per term,
