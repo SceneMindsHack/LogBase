@@ -316,16 +316,22 @@ def search(dataset: str, query: str, limit: int = 10,
            levels: list[str] | None = None) -> dict:
     """Full-text search returning a total match count and bounded evidence.
 
-    Full-text token matching on log content (not substring matching). Level
-    filtering is a separate exact match on the level column, applied in addition
-    to the full-text query. total_matches is the unlimited count; limit bounds
-    only the returned evidence rows. Each evidence row includes a one-based rank and
-    its dataset, source_file, and line_id. content_preview is truncated to 500
-    characters.
+    Full-text token matching on log content (not substring matching), parsed by
+    SereneDB's websearch_to_tsquery. Query syntax: bare words are combined with
+    AND (every word must appear), so "disk info" matches lines containing both
+    "disk" and "info", not either alone. Wrap text in double quotes for a phrase
+    ("disk info" matches the words adjacent and in order). Prefix a word with -
+    to exclude it (error -timeout). Use OR for alternatives (disk OR volume).
+    A single word behaves as before. Level filtering is a separate exact match on
+    the level column, applied in addition to the query. total_matches is the
+    unlimited count; limit bounds only the returned evidence rows. Each evidence
+    row includes a one-based rank and its dataset, source_file, and line_id.
+    content_preview is truncated to 500 characters.
 
     Args:
         dataset: "bgl" or "openstack".
-        query: Full-text query, 1 to 1000 characters.
+        query: Full-text query, 1 to 1000 characters. Bare words AND together;
+            "quoted text" is a phrase; -word excludes; OR gives alternatives.
         limit: Max evidence rows returned, 1 to 100 (default 10).
         since: Optional source-local ISO datetime, inclusive (no timezone offset).
         until: Optional source-local ISO datetime, exclusive (no timezone offset).

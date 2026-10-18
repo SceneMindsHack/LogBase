@@ -192,7 +192,7 @@ LogBase exposes eight read-only tools over MCP. All of them share these rules:
 | Tool | What it does | Key inputs | Returns |
 |---|---|---|---|
 | `data_overview` | Shows what data exists. Call it first. | `dataset` (default `all`) | Row counts, time range, parse failures, valid levels, teams and components |
-| `search` | Full-text search on log content | `dataset`, `query`, `limit`, `since`, `until`, `levels` | `total_matches`, ranked evidence rows |
+| `search` | Full-text search on log content (AND / phrase / exclude syntax) | `dataset`, `query`, `limit`, `since`, `until`, `levels` | `total_matches`, ranked evidence rows |
 | `nearby_events` | Lines before and after a chosen line | `dataset`, anchor (`anchor_time` or `source_file` + `line_id`), `window_minutes`, `limit`, `node`, `component`, `all_nodes` | Window lines in time order, anchor flagged |
 | `get_event_details` | One complete log event | `dataset`, `source_file`, `line_id` | All fields, raw evidence, fictional owning team |
 | `trend` | Line counts per hour, day or week | `dataset`, `interval`, `start`, `end`, `level`, `component` | Zero-filled buckets in chronological order |
@@ -208,7 +208,7 @@ LogBase exposes eight read-only tools over MCP. All of them share these rules:
 
 ### Things worth knowing
 
-- **`search`** matches whole words, not substrings, and the word "error" is not the same as level `ERROR`. Use `levels` for the level. Each evidence row has a one-based `rank` plus its `dataset`, `source_file` and `line_id`, so "show result 2" can be resolved with `get_event_details` or `nearby_events`. `limit` is 1 to 100, and `content_preview` is cut at 500 characters.
+- **`search`** matches whole words, not substrings, and the word "error" is not the same as level `ERROR`. Use `levels` for the level. The `query` is parsed by `websearch_to_tsquery`: bare words are ANDed (`disk info` needs both), `"quoted text"` is a phrase, `-word` excludes, and `OR` gives alternatives; a single word is a plain token match. Each evidence row has a one-based `rank` plus its `dataset`, `source_file` and `line_id`, so "show result 2" can be resolved with `get_event_details` or `nearby_events`. `limit` is 1 to 100, and `content_preview` is cut at 500 characters.
 - **`nearby_events`** returns half of `limit` from each side of the anchor, closest first, while `total_matches` counts the whole window. On BGL, anchoring by line limits results to that line's node unless `all_nodes` is set. Time proximity does not prove causation.
 - **`trend`** zero-fills empty buckets, and the first and last buckets may be partial. `start` and `end` are required.
 - **`count_by` and `top_problems`** report the full denominator in `total_matching_rows`. `count_by` groups by `dimension` (`component`, `team` or `severity`); `top_problems` groups by `group_by` (`component` or `team`). Both accept an optional `text` full-text filter (which needs the indexes built). `top_problems` defaults to the problem levels `FATAL`, `WARNING`, `SEVERE`, `ERROR`, `FAILURE`, `WARN` and `CRITICAL`, and an explicit `levels` list overrides that. `top_n` is 1 to 50.
@@ -216,10 +216,16 @@ LogBase exposes eight read-only tools over MCP. All of them share these rules:
 
 ### Examples
 
-`search`:
+`search` (single word):
 
 ```json
 {"dataset":"openstack","query":"error","levels":["ERROR"],"limit":5}
+```
+
+`search` (phrase):
+
+```json
+{"dataset":"openstack","query":"\"disk info\"","levels":["ERROR"],"limit":5}
 ```
 
 `nearby_events`:
