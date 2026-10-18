@@ -1,290 +1,217 @@
 # LogBase
 
-Load, verify, export and search BGL/OpenStack logs in SereneDB. One shared parser
-and schema serve both datasets. MCP tools and agent workflows are the next layer.
+LogBase turns the massive BGL and OpenStack log corpora into evidence-grounded
+answers. An AI agent calls a set of read-only MCP tools that search and aggregate
+inside SereneDB and return only bounded evidence or exact counts — never the raw
+corpus.
 
-For a deep explanation of the project, the architecture and every tool, see
-[docs/documentation.md](docs/documentation.md).
+<p align="center">
+  <img src="docs/images/demo-1-top-team.png" alt="Ranking teams by problem-level log volume" width="32%" />
+  <img src="docs/images/demo-2-severity-breakdown.png" alt="Severity breakdown for a team" width="32%" />
+  <img src="docs/images/demo-3-fatal-over-time.png" alt="FATAL records charted over time" width="32%" />
+</p>
 
-## Choose a connection
 
-Copy `.env.example` to `.env`. Every Python command below reads this same file.
-Environment variables already set in the terminal take precedence.
 
-| Choice | Setting | Requirements | Recommended use |
-|---|---|---|---|
-| Local Docker | `SERENEDB_CONNECTION=docker` | Docker CLI and a running `serenedb` container; no password | Easiest local setup; default |
-| Direct Python | `SERENEDB_CONNECTION=direct` | Host, port, database, user and configured password; uses psycopg | Direct application/database access |
 
-Both choices use database `logbase`, the same schema and the same commands.
-See [setup instructions](docs/database-setup.md) for password configuration,
-existing-container handling and Windows/Linux/macOS environment commands.
+## Setup
 
-## Quick start
+Everything runs locally. You need **Docker** (running), **Python 3.12**, and
+**Git**. Run all commands from the repository root, in order.
 
-From the repository root, with the Python environment active:
+
+### 1. Start the database
+
+`compose.yaml` pins the SereneDB image, the localhost port `7890`, and a persistent
+volume, so one command does it:
 
 ```sh
+docker compose up -d      # then `docker ps` to confirm it shows "Up"
+```
+
+
+### 2. Set up Python
+
+Create the environment, install the three dependencies, and copy the default
+`.env` (which targets the local Docker database — no editing needed).
+
+**Windows (PowerShell)**
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1    # if blocked: Set-ExecutionPolicy -Scope Process RemoteSigned
 python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+**Linux / macOS (bash/zsh)**
+
+```sh
+python3.12 -m venv .venv && source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+```
+
+Then initialize and check the connection:
+
+```sh
 python scripts/db.py --init
-python scripts/db.py --check
+python scripts/db.py --check    # prints one row with connection_ok
+```
+
+
+### 3. Load the datasets
+
+Download the two corpora and unpack them into one folder with this **exact**
+layout (the loader looks for these names):
+
+```text
+input-data/
+  BGL/BGL.log
+  OpenStack/openstack_normal1.log
+  OpenStack/openstack_normal2.log
+  OpenStack/openstack_abnormal.log
+```
+
+- **BGL** — <https://zenodo.org/records/8196385/files/BGL.zip?download=1>
+- **OpenStack** — <https://zenodo.org/records/8196385/files/OpenStack.tar.gz?download=1>
+
+Load, apply ownership, verify, then build the full-text indexes. Replace
+`PATH_TO_INPUT_FOLDER` with the folder above (quote it if it has spaces):
+
+```sh
 python scripts/load_logs.py --data-root "PATH_TO_INPUT_FOLDER" --load
 python scripts/db.py --file sql/ownership.sql
 python scripts/db.py --file sql/verify.sql
 python scripts/search_logs.py --setup
-python scripts/search_logs.py --dataset openstack --query error --limit 5
 ```
 
-`PATH_TO_INPUT_FOLDER` contains `BGL/BGL.log` and the three files inside
-`OpenStack/`. Files can remain outside the repository. If your database is already
-loaded, skip the import: it deliberately refuses to duplicate existing rows.
+> Loading the full BGL corpus (~4.75M lines) takes a few minutes — a one-time
+> step. The loader refuses to duplicate rows, so re-running is safe; if the data
+> is already loaded, skip straight to `--setup`.
 
-Optional CSV export (no database connection required):
+
+### 4. Connect an AI client (MCP)
+
+The tools are served over stdio by `scripts/tools.py`, so any MCP client (Claude
+Code, Codex, Cursor, Kiro) can use them. `--scope project` writes a shareable
+`.mcp.json` at the repo root:
 
 ```sh
-python scripts/export_csv.py --data-root "PATH_TO_INPUT_FOLDER"
+# Claude Code
+claude mcp add logbase --scope project -- .venv/bin/python scripts/tools.py          # Linux/macOS
+claude mcp add logbase --scope project -- .venv\Scripts\python.exe scripts\tools.py  # Windows
+
+# Codex
+codex mcp add logbase -- .venv/bin/python scripts/tools.py          # Linux/macOS
+codex mcp add logbase -- .venv\Scripts\python.exe scripts\tools.py  # Windows
 ```
 
-This writes `data/processed/bgl_full.csv` and `openstack_full.csv`, with headers
-matching the shared schema. Choose a new `--output-dir` for another export;
-existing exports are not overwritten. Null values become empty CSV fields;
-booleans are `True`/`False`. The supported database import reads raw logs directly.
+For other clients, add this stdio server to their MCP config, replacing
+`ABSOLUTE_PATH_TO_REPO` with your checkout path:
 
-## Files
-
-| Path | Purpose |
-|---|---|
-| `scripts/db.py` | Both connection adapters, initialization, connection check and SQL execution |
-| `scripts/load_logs.py` | Single shared parser, full import and source/database verification |
-| `scripts/export_csv.py` | Optional CSV export using that same parser |
-| `scripts/search_logs.py` | Index setup and bounded full-text search with counts and evidence |
-| `scripts/check_import.py` | Small real-database round-trip check |
-| `sql/schema.sql` | The two full-corpus tables |
-| `sql/ownership.sql` | Fictional component ownership |
-| `sql/verify.sql` | Counts, date ranges and duplicate evidence checks |
-| `compose.yaml` | Pinned SereneDB image, localhost port and persistent storage |
-| `tests/` | Offline regression tests |
-
-## Shared data contract
-
-Use `bgl_logs` and `openstack_logs`. Common fields: `source_file`, `line_id`,
-`event_time`, `level`, `component`, `content`, `raw_text`, `parse_ok`, `parse_error`,
-`event_id`, `event_template`, `raw_text_base64`.
-
-Evidence identity is **dataset + source_file + line_id**. A row is a physical
-input line, not an incident. Timestamps retain source wall-clock time without
-inventing a timezone. BGL and OpenStack cover different years.
-
-Malformed headers remain with `parse_ok=false`. Records containing null bytes
-show `\u0000` in readable text; `raw_text_base64` preserves the exact original
-UTF-8 line. Other originals retain their text except the line terminator.
-BGL also retains `epoch_seconds`, `label`, `node`, `log_type`. OpenStack retains
-`log_record`, `pid`, `correlation_data`, `request_id`, `instance_id`; initial
-bracketed context remains in `content`. `event_id`/`event_template` remain null
-until a deliberate pattern-extraction step is added.
-
-Ownership joins on `(dataset, component)`. Teams are fictional; unmatched
-components should appear as `Unassigned`. Labels and filenames do not prove causes.
-
-Search outputs include the executed SQL, total matches, bounded evidence and a
-truncation flag. `content_preview` is limited to 500 characters; retrieve complete
-evidence by source identity when needed. Time filters use source-local ISO dates,
-inclusive `--since` and exclusive `--until`. Full-text tokens differ from substring
-matching, so no misleading substring-versus-token speedup is claimed.
-
-## Connect an agent (MCP server)
-
-The tools listed in the tool catalog are exposed through an MCP server,
-`scripts/tools.py` (stdio transport), so any MCP client (Claude Code, Codex,
-Cursor, Kiro) can discover and call them.
-
-Before connecting, finish the Quick start: Docker is running with SereneDB,
-`.env` exists (copy `.env.example`), the data is loaded, and the full-text
-indexes are built (`python scripts/search_logs.py --setup`).
-
-**Server command**
-
-| Field | Value |
-|---|---|
-| `command` | Python interpreter: `.venv/Scripts/python.exe` (Windows), `.venv/bin/python` (Linux/macOS), or plain `python` if the packages in `requirements.txt` are installed globally |
-| `args` | `["scripts/tools.py"]` |
-
-The server reads its database connection from `.env` in the repository root,
-whatever directory it is started from.
-
-**Quick add (run from the repository root)**
-
-`--scope project` writes a shareable `.mcp.json` at the repo root, so the config
-travels with the checkout.
-
-```sh
-# Claude Code (Linux/macOS)
-claude mcp add logbase --scope project -- .venv/bin/python scripts/tools.py
-
-# Claude Code (Windows PowerShell)
-claude mcp add logbase --scope project -- .venv\Scripts\python.exe scripts\tools.py
-
-# Codex (Linux/macOS)
-codex mcp add logbase -- .venv/bin/python scripts/tools.py
-
-# Codex (Windows PowerShell)
-codex mcp add logbase -- .venv\Scripts\python.exe scripts\tools.py
+```json
+{
+  "mcpServers": {
+    "logbase": {
+      "command": "ABSOLUTE_PATH_TO_REPO/.venv/bin/python",
+      "args": ["ABSOLUTE_PATH_TO_REPO/scripts/tools.py"]
+    }
+  }
+}
 ```
 
-The `--` separates the client's own flags from the server command.
+**Verify:** run `/mcp` (or your client's equivalent), confirm `logbase` is
+connected, then ask the agent to call `data_overview` — it should return BGL and
+OpenStack row counts. You're ready.
 
-**Other clients (Cursor, Kiro, ...)**
 
-Add a stdio MCP server using the block in `mcp.example.json`, replacing
-`ABSOLUTE_PATH_TO_REPO` with the full path to your checkout.
 
-**Check that it works**
 
-1. Run `/mcp` in Claude Code (or your client's equivalent) and confirm `logbase`
-   is connected.
-2. Ask the agent to call `data_overview`. It should return row counts for BGL
-   and OpenStack.
-3. If your client does not show server instructions, paste the guidance from
-   `INSTRUCTIONS` in `scripts/tools.py` into the chat before asking questions.
+## Tools
 
-The `logbase` server is separate from the SereneDB **docs** MCP
-(`https://api.serenedb.com/mcp`) used during setup. Keep both configured if you
-want the agent to answer SereneDB questions as well.
-
-## Role-aware agent usage
-
-Once the `logbase` MCP server is configured in a supported client, Codex,
-Claude Code and Kiro can use its tools conversationally.
-A clear question is answered directly; a broad request asks which perspective is
-desired. Roles change the workflow, level of detail, recommended next steps and
-useful follow-up questions, not the underlying facts, calculations, database
-access or permissions.
-
-| Request | Expected behavior |
-|---|---|
-| "What are the top five problems in the OpenStack logs?" | Answer directly with `top_problems`. |
-| "Brief me on OpenStack." | Ask whether the user wants an engineer, team-lead, manager or general perspective. |
-| "I'm an engineer; investigate authentication failures." | Search and retrieve exact evidence, then suggest the next technical check or nearby events to inspect. |
-| "I'm a team lead; assess authentication failures." | Compare counts and trends, then suggest monitoring, component priorities or affected-team coordination. |
-| "I'm a manager; brief me on OpenStack." | Give a concise overview and hotspot ranking, then suggest priorities, escalation questions or areas needing investigation. |
-
-A drill-down can remain conversational: "Search for authentication failures," then
-"Show details for result 2," then "Show what happened around that event." Search
-results are numbered and retain `dataset`, `source_file` and `line_id`, allowing the
-later requests to address the same evidence. Ownership mappings are fictional;
-log-row frequency or correlation does not prove distinct incidents, causation or
-root causes.
-
-## Tool catalog
-
-This is a quick reference. For a per-tool deep dive with full parameter tables,
-examples and returned-field descriptions, see
+LogBase exposes eight read-only tools over MCP. All searching and counting runs
+**inside SereneDB** — the agent never pulls the raw corpus into the model. Every
+result carries the executed `sql`, `elapsed_seconds`, and (for bounded output) the
+total count and a `truncated` flag, so a limited answer is never mistaken for the
+whole picture. For full parameter tables, examples and returned fields, see
 [docs/documentation.md](docs/documentation.md).
 
-LogBase exposes eight read-only tools over MCP. All of them share these rules:
+| Tool | What it does | Returns |
+|---|---|---|
+| `data_overview` | Discovery tool — shows what data exists. Call it first. | Row counts, time range, parse failures, valid levels, teams and components |
+| `search` | Full-text search on SereneDB's inverted index, with phrase, AND and exclude syntax | `total_matches` and ranked evidence rows |
+| `nearby_events` | The lines immediately before and after a chosen event | Window lines in time order, anchor flagged |
+| `get_event_details` | One complete log event by its stable identity | All fields, recoverable raw evidence, owning team |
+| `trend` | Exact counts per hour, day or week | Zero-filled buckets in chronological order |
+| `count_by` | Exact per-group counts over the whole dataset | Ranked groups with counts and percentages |
+| `top_problems` | Ranked operational hotspots by component or team | Ranked groups with counts and percentages |
+| `distinctive_terms` | Terms over-represented in a period versus a baseline, via SereneDB's native term-dictionary aggregates | Terms with document counts, shares and change |
 
-- Every result includes the executed `sql` and `elapsed_seconds`. Tools that bound their output also return the total count and a `truncated` flag, so a limited result is never mistaken for the full picture.
-- Counts are physical log lines, not incidents, and frequency does not prove a cause.
-- Team names come from a fictional ownership table. Unmapped components count as `Unassigned`.
-- Timestamps are source-local ISO strings with no timezone. Start bounds are inclusive and end bounds are exclusive.
-- BGL (2005 to 2006) and OpenStack (2017) cover different periods and are never merged.
+Two tools lean on SereneDB capabilities: `search` uses
+its inverted full-text index for real phrase queries, and `distinctive_terms`
+computes document-frequency comparisons with the native `ts_dict_agg` /
+`ts_dict_count` aggregates — entirely in the database, with no corpus scan in Python.
 
-| Tool | What it does | Key inputs | Returns |
-|---|---|---|---|
-| `data_overview` | Shows what data exists. Call it first. | `dataset` (default `all`) | Row counts, time range, parse failures, valid levels, teams and components |
-| `search` | Full-text search on log content (AND / phrase / exclude syntax) | `dataset`, `query`, `limit`, `since`, `until`, `levels` | `total_matches`, ranked evidence rows |
-| `nearby_events` | Lines before and after a chosen line | `dataset`, anchor (`anchor_time` or `source_file` + `line_id`), `window_minutes`, `limit`, `node`, `component`, `all_nodes` | Window lines in time order, anchor flagged |
-| `get_event_details` | One complete log event | `dataset`, `source_file`, `line_id` | All fields, raw evidence, fictional owning team |
-| `trend` | Line counts per hour, day or week | `dataset`, `interval`, `start`, `end`, `level`, `component` | Zero-filled buckets in chronological order |
-| `count_by` | Exact counts per group over the whole dataset | `dataset`, `dimension` (component, team or severity), filters, `limit` | Ranked groups with counts and percentages |
-| `top_problems` | Ranks hotspots by component or team | `dataset`, `group_by`, filters, `top_n` | Ranked groups with counts and percentages |
-| `distinctive_terms` | Words over-represented in one period compared with a baseline | `dataset`, foreground and baseline windows, filters, `top_n` | Terms with document counts, shares and change |
 
-**Which tools each role typically uses.** Roles change the workflow and the recommendations, not access or facts.
 
-- Engineer: `search`, `get_event_details`, `nearby_events`
-- Team lead: `count_by`, `trend`, `distinctive_terms`
-- Manager: `data_overview`, `top_problems`, `count_by`
+## Role-specific analysis
 
-### Things worth knowing
+The same tools and the same corpus serve three distinct audiences, and LogBase
+tailors its workflow, evidence and next steps to each — never the facts,
+calculations or database access, which stay identical for everyone.
 
-- **`search`** matches whole words, not substrings, and the word "error" is not the same as level `ERROR`. Use `levels` for the level. The `query` is parsed by `websearch_to_tsquery`: bare words are ANDed (`disk info` needs both), `"quoted text"` is a phrase, `-word` excludes, and `OR` gives alternatives; a single word is a plain token match. Each evidence row has a one-based `rank` plus its `dataset`, `source_file` and `line_id`, so "show result 2" can be resolved with `get_event_details` or `nearby_events`. `limit` is 1 to 100, and `content_preview` is cut at 500 characters.
-- **`nearby_events`** returns half of `limit` from each side of the anchor, closest first, while `total_matches` counts the whole window. On BGL, anchoring by line limits results to that line's node unless `all_nodes` is set. Time proximity does not prove causation.
-- **`trend`** zero-fills empty buckets, and the first and last buckets may be partial. `start` and `end` are required.
-- **`count_by` and `top_problems`** report the full denominator in `total_matching_rows`. `count_by` groups by `dimension` (`component`, `team` or `severity`); `top_problems` groups by `group_by` (`component` or `team`). Both accept an optional `text` full-text filter (which needs the indexes built). `top_problems` defaults to the problem levels `FATAL`, `WARNING`, `SEVERE`, `ERROR`, `FAILURE`, `WARN` and `CRITICAL`, and an explicit `levels` list overrides that. `top_n` is 1 to 50.
-- **`distinctive_terms`** compares document frequency (records containing a term) between two non-overlapping windows. `min_foreground_docs` (default 5) sets the minimum foreground support, and `exclude_terms` drops extra terms on top of a small default list. Each term reports its foreground and baseline document counts, both shares, `share_change_pp`, and `ratio` (null when the term is absent from the baseline, flagged by `new_in_baseline_comparison`). It suggests leads, not causes, and its score is a heuristic, not a significance test. `status` is `ok`, `no_distinctive_terms` or `insufficient_data`. It reflects the full-text index as last refreshed by `scripts/search_logs.py --setup`.
+| Role | Focus | Tools it leans on |
+|---|---|---|
+| **Engineer** | Exact evidence identities, surrounding context, and the next technical check to run | `search`, `get_event_details`, `nearby_events` |
+| **Team lead** | Totals, trends and recurring-component patterns to coordinate around | `count_by`, `trend`, `distinctive_terms` |
+| **Manager** | Concise hotspot rankings, ownership and decision-oriented tradeoffs | `data_overview`, `top_problems`, `count_by` |
 
-### Examples
+How the agent decides on a perspective:
 
-`search` (single word):
+- If the user states their role, the response is tailored to it.
+- If the request is specific enough, the agent answers directly, at the right
+  level of detail, without asking for a role.
+- If the request is broad and a role would materially change the answer, the agent
+  asks whether the user is an engineer, team lead, or manager.
+- The agent never asks for a role when it is unnecessary.
 
-```json
-{"dataset":"openstack","query":"error","levels":["ERROR"],"limit":5}
-```
+Throughout, observed evidence stays separate from recommendations, and frequency or
+correlation is never presented as a confirmed cause.
 
-`search` (phrase):
 
-```json
-{"dataset":"openstack","query":"\"disk info\"","levels":["ERROR"],"limit":5}
-```
 
-`nearby_events`:
 
-```json
-{"dataset":"openstack","source_file":"openstack_normal1.log","line_id":27179,"window_minutes":1,"limit":4}
-```
+## Extra features
 
-`count_by`:
+- **Data visualisation** — numerical answers (trends, category counts, rankings,
+  distinctive-term shares) are charted automatically, with no need to ask.
+- **Investigation summary** — at a natural stopping point the agent can produce an
+  opt-in recap: the investigation story, the full cited evidence, and an appendix
+  of every query that actually ran.
+- **Phrase matching** — `search` understands real query syntax: multi-word
+  phrases, implicit AND, exclusions and alternatives, not just single keywords.
 
-```json
-{"dataset":"bgl","dimension":"team","limit":5}
-```
+For the full architecture, per-tool reference and these features in depth, see
+[docs/documentation.md](docs/documentation.md).
 
-`top_problems`:
 
-```json
-{"dataset":"openstack","group_by":"component","levels":["ERROR"],"since":"2017-05-16","until":"2017-05-17","top_n":5}
-```
+## Limitations
 
-`distinctive_terms`:
+- **No feedback loop to validate insights.** We work with static logs and no access
+  to the live systems behind them, so the agent can suggest a fix but we cannot
+  apply it and re-read the logs to confirm it worked. A practical evaluation loop
+  would have measured how good the insights really are.
+- **Conversation-scoped recaps.** Investigation recaps are built from retained
+  conversation context, not a durable store; if history is compacted or the session
+  restarts, the agent discloses the gap rather than reconstructing it.
+- **Model-dependent presentation.** The server guides the agent (auto-charting,
+  role-aware answers, recaps), but actual behavior — chart rendering especially —
+  depends on the MCP client and model.
 
-```json
-{"dataset":"openstack","foreground_start":"2017-05-16T00:00:00","foreground_end":"2017-05-16T01:00:00","baseline_start":"2017-05-16T01:00:00","baseline_end":"2017-05-16T02:00:00","min_foreground_docs":20,"top_n":5}
-```
-
-## Provenance and investigation recaps
-
-Every tool result includes a `provenance` field recording the actual call: a
-unique `call_id`, the tool name, the resolved `arguments` (including defaults),
-UTC `started_at`/`completed_at` timestamps, and the exact executed SQL under
-`queries` (in execution order; `data_overview`'s per-dataset statements are
-flattened and tagged by dataset). This is additive execution provenance surfaced
-to the client, not a tamper-proof audit log. Execution times are UTC; log-event
-times stay source-local — they are different clocks. A failed call raises and
-receives no provenance; no success is fabricated.
-
-The provenance helper lives in `scripts/provenance.py` and is invoked by the thin
-MCP wrappers in `scripts/tools.py`; tool signatures, descriptions, and existing
-output fields are unchanged.
-
-At a meaningful stopping point the agent may offer a one-time **investigation
-recap**: a short narrative of the investigation, the full cited log evidence (via
-`get_event_details`, with field headers and complete `raw_text`), any relevant
-charts, conclusions and next steps, and an appendix grouping the executed queries
-by tool using these `call_id`s. The recap is opt-in and composed from retained
-conversation results; it is conversation-scoped, not a durable store, so missing
-history is disclosed rather than reconstructed. See `AGENTS.md` for the behavior
-guidance.
 
 ## Tests
 
-```sh
-python -m unittest discover -s tests -v
-python scripts/check_import.py
-```
-
-The second command needs the initialized database. The loader checks counts,
-severity totals, date ranges and unique source identities. Local reports go to
-ignored `reports/`. Raw logs, exports, environments and `.env` are not committed.
+See [tests/tests.md](tests/tests.md) for how to run the full test suite.
 
 Data source: Loghub (Zhu et al., ISSRE 2023; BGL also Oliner and Stearley, DSN 2007).

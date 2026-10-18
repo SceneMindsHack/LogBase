@@ -3,7 +3,8 @@
 Deep reference for the LogBase project: what it is, how a tool call flows through
 the system, and a full description of each MCP tool with its inputs, examples and
 returned fields. For a quick overview and setup, see the [README](../README.md);
-this document is the detailed companion to the README's **Tool catalog**.
+this document is the detailed companion to the README's **Tools** and
+**Extra features** sections.
 
 ## Overview
 
@@ -332,3 +333,57 @@ anomalies, distinct incidents, causes, or root causes. `status` is `ok`,
 or `insufficient_data` (a window with no eligible records). Eligible records are
 timed rows with non-null content matching the filters. Results reflect the index
 as last refreshed by `scripts/search_logs.py --setup`.
+
+## Extra features
+
+Beyond the eight tools, three capabilities make the answers easier to act on.
+They are driven by the server's `INSTRUCTIONS` and the shared provenance layer, not
+by extra database queries.
+
+### Data visualisation
+
+Numerical answers are charted automatically, without the user asking. The server
+instructions map each quantitative tool to a default chart: `trend` to a
+chronological line or bar chart, `count_by` to category bars with a zero baseline,
+`top_problems` to ranked horizontal bars, and `distinctive_terms` to paired
+foreground/baseline document-share bars. Charts use the client's real graphical
+rendering (never ASCII or Markdown imitations), plot the exact returned aggregates,
+and carry the dataset, filters, interval, units and truncation in their labels.
+Charts accompany the evidence and caveats; they never replace them. An explicit
+text-only or table-only request overrides the default, and when a client cannot
+render a chart the agent falls back to a table and says so.
+
+### Investigation summary
+
+At a meaningful stopping point the agent can produce an opt-in **investigation
+recap**. It is offered once ("Would you like an investigation recap with the
+evidence, charts, and queries?"), never after a single lookup and never repeated
+after a decline. Accepted, it reads back: the question and scope; a short narrative
+of the meaningful checks and how the evidence shifted the interpretation,
+distinguishing the user's choices from the agent's own; conclusions, open
+hypotheses and specific next steps; and a tools-and-queries appendix that groups
+every executed statement by tool, each with its provenance `call_id` and exact SQL.
+
+This is powered by the **provenance** layer: every tool result carries a
+`provenance` field (unique `call_id`, tool name, resolved `arguments` including
+defaults, UTC `started_at`/`completed_at`, and the exact executed SQL under
+`queries`, in execution order; `data_overview`'s per-dataset statements are
+flattened and tagged by dataset). It is additive execution provenance surfaced to
+the client, implemented in `scripts/provenance.py` and invoked by the thin wrappers
+in `scripts/tools.py` without changing any tool's signature or output. Execution
+timestamps are UTC and stay distinct from source-local log times. A failed call
+raises and receives no provenance, so the recap reports such a call as a failure
+with its id and SQL marked unavailable rather than inventing them. The recap is
+composed from retained conversation results — it is conversation-scoped, not a
+durable store — so any missing history is disclosed, never reconstructed.
+
+### Phrase matching
+
+`search` understands real query syntax rather than only single keywords. The
+`query` is parsed by SereneDB's `websearch_to_tsquery`: bare words are ANDed
+(`disk info` requires both), `"quoted text"` matches an exact phrase, `-word`
+excludes a term, and `OR` gives alternatives. Matching is on whole tokens, not
+substrings, and stays separate from the `levels` filter — so the word `"error"` in
+the text is distinct from severity level `ERROR`. This lets an investigator express
+precise evidence queries ("authentication failure" as a phrase, excluding noise)
+in one call.
