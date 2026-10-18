@@ -11,6 +11,7 @@ log records, not request failure rates, incidents, or business impact. Terms are
 investigative leads, not causes.
 """
 import time
+from datetime import datetime, timedelta
 
 try:
     from .db import records, literal
@@ -30,11 +31,12 @@ DEFAULT_EXCLUDED_TERMS = (
 )
 MAX_TOP_N = 50
 MAX_EXCLUSIONS = 100
+MAX_WINDOW_HOURS = 24
+MIN_INTERPRETATION_RECORDS = 100
 # Shares are expressed as proportions in [0, 1]; share_change_pp is percentage points.
 
 
 def _parse_local(value, label):
-    from datetime import datetime
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f'{label} must be an ISO date/time string')
     try:
@@ -51,6 +53,9 @@ def _validate_window(start, end, label):
     end_dt = _parse_local(end, f'{label}_end')
     if start_dt >= end_dt:
         raise ValueError(f'{label}_start must precede {label}_end')
+    if end_dt - start_dt > timedelta(hours=MAX_WINDOW_HOURS):
+        raise ValueError(
+            f'{label} window may span at most {MAX_WINDOW_HOURS} hours')
     return start_dt, end_dt
 
 
@@ -173,16 +178,23 @@ def distinctive_terms_sql(dataset, foreground_start, foreground_end,
         "                ELSE 0 END AS baseline_share\n"
         "    FROM joined\n"
         "    WHERE foreground_total > 0\n"
+        "), qualifying AS (\n"
+        "    SELECT term, foreground_docs, baseline_docs,\n"
+        "           foreground_total, baseline_total,\n"
+        "           foreground_share, baseline_share,\n"
+        "           foreground_share - baseline_share AS share_change,\n"
+        "           foreground_docs - foreground_total * baseline_share AS excess_documents,\n"
+        "           CASE WHEN baseline_share > 0\n"
+        "                THEN foreground_share / baseline_share ELSE NULL END AS ratio\n"
+        "    FROM scored\n"
+        "    WHERE foreground_docs - foreground_total * baseline_share > 0\n"
         ")\n"
         "SELECT term, foreground_docs, baseline_docs,\n"
         "       foreground_total, baseline_total,\n"
         "       foreground_share, baseline_share,\n"
-        "       foreground_share - baseline_share AS share_change,\n"
-        "       foreground_docs - foreground_total * baseline_share AS excess_documents,\n"
-        "       CASE WHEN baseline_share > 0\n"
-        "            THEN foreground_share / baseline_share ELSE NULL END AS ratio\n"
-        "FROM scored\n"
-        "WHERE foreground_docs - foreground_total * baseline_share > 0\n"
+        "       share_change, excess_documents, ratio,\n"
+        "       COUNT(*) OVER () AS total_qualifying_terms\n"
+        "FROM qualifying\n"
         "ORDER BY excess_documents DESC, foreground_docs DESC, term ASC\n"
         f"LIMIT {top_n}"
     )
@@ -202,6 +214,7 @@ def distinctive_terms_sql(dataset, foreground_start, foreground_end,
         'min_foreground_docs': min_foreground_docs,
         'top_n': top_n,
         'excluded_terms': exclusions,
+        'maximum_window_hours': MAX_WINDOW_HOURS,
     }
     return sql, metadata
 
@@ -216,6 +229,26 @@ def _eligible_counts_sql(dataset, fg, bg, component, levels):
             f"       (SELECT COUNT(*) FROM {index} WHERE {bg_where}) AS baseline_total")
 
 
+def _interpretation_warnings(foreground_total, baseline_total):
+    """Warnings for non-empty samples too small for stable interpretation.
+
+    The threshold is a practical guardrail, not a statistical guarantee.
+    """
+    warnings = []
+    if 0 < foreground_total < MIN_INTERPRETATION_RECORDS:
+        warnings.append(
+            f'Foreground has fewer than {MIN_INTERPRETATION_RECORDS} eligible '
+            'records; document shares and term rankings may be unstable. '
+            'This threshold is a practical interpretation warning, not a '
+            'statistical guarantee.')
+    if 0 < baseline_total < MIN_INTERPRETATION_RECORDS:
+        warnings.append(
+            f'Baseline has fewer than {MIN_INTERPRETATION_RECORDS} eligible '
+            'records; ratios and comparisons may be unstable. This threshold '
+            'is a practical interpretation warning, not a statistical guarantee.')
+    return warnings
+
+
 def distinctive_terms(dataset, foreground_start, foreground_end, baseline_start,
                       baseline_end, component=None, levels=None,
                       min_foreground_docs=5, top_n=10, exclude_terms=None):
@@ -228,20 +261,25 @@ def distinctive_terms(dataset, foreground_start, foreground_end, baseline_start,
         dataset, foreground_start, foreground_end, baseline_start, baseline_end,
         component, levels, min_foreground_docs, top_n, exclude_terms)
 
-    fg = (_parse_local(foreground_start, 'foreground_start'),
-          _parse_local(foreground_end, 'foreground_end'))
-    bg = (_parse_local(baseline_start, 'baseline_start'),
-          _parse_local(baseline_end, 'baseline_end'))
-    counts_sql = _eligible_counts_sql(dataset, fg, bg, component,
-                                      metadata['effective_filters']['levels'])
-
     started = time.perf_counter()
     rows = records(sql)
-    counts = records(counts_sql)[0]
+    executed_sql = [sql]
+    if rows:
+        foreground_total = int(rows[0]['foreground_total'])
+        baseline_total = int(rows[0]['baseline_total'])
+    else:
+        fg = (_parse_local(foreground_start, 'foreground_start'),
+              _parse_local(foreground_end, 'foreground_end'))
+        bg = (_parse_local(baseline_start, 'baseline_start'),
+              _parse_local(baseline_end, 'baseline_end'))
+        counts_sql = _eligible_counts_sql(
+            dataset, fg, bg, component, metadata['effective_filters']['levels'])
+        counts = records(counts_sql)[0]
+        executed_sql.append(counts_sql)
+        foreground_total = int(counts['foreground_total'])
+        baseline_total = int(counts['baseline_total'])
     elapsed = round(time.perf_counter() - started, 3)
-
-    foreground_total = int(counts['foreground_total'])
-    baseline_total = int(counts['baseline_total'])
+    warnings = _interpretation_warnings(foreground_total, baseline_total)
 
     method = {
         'engine': 'SereneDB native inverted-index term dictionary',
@@ -255,6 +293,8 @@ def distinctive_terms(dataset, foreground_start, foreground_end, baseline_start,
         'excluded_terms': metadata['excluded_terms'],
         'top_n': top_n,
         'result_kind': 'top_n (bounded ranking, not the exhaustive vocabulary)',
+        'maximum_window_hours': MAX_WINDOW_HOURS,
+        'small_window_warning_threshold_records': MIN_INTERPRETATION_RECORDS,
         'freshness': 'reflects the inverted index as last refreshed; not guaranteed '
                      'real-time if records were ingested after the last refresh',
     }
@@ -268,7 +308,8 @@ def distinctive_terms(dataset, foreground_start, foreground_end, baseline_start,
         'foreground_total': foreground_total,
         'baseline_total': baseline_total,
         'method': method,
-        'sql': sql,
+        'sql': executed_sql,
+        'warnings': warnings,
         'elapsed_seconds': elapsed,
         'caveat': ('Shares are proportions of log records, not request failure rates '
                    'or business impact. Repeated messages can dominate term counts. '
@@ -277,7 +318,8 @@ def distinctive_terms(dataset, foreground_start, foreground_end, baseline_start,
     }
 
     if foreground_total == 0 or baseline_total == 0:
-        base.update({'status': 'insufficient_data', 'terms': [],
+        base.update({'status': 'insufficient_data', 'returned': 0,
+                     'truncated': False, 'total_qualifying_terms': 0, 'terms': [],
                      'note': 'One or both windows had no eligible records '
                              '(timed, non-null content, matching filters).'})
         return base
@@ -300,9 +342,13 @@ def distinctive_terms(dataset, foreground_start, foreground_end, baseline_start,
             'new_in_baseline_comparison': baseline_docs == 0,
         })
 
+    total_qualifying_terms = (
+        int(rows[0]['total_qualifying_terms']) if rows else 0)
     base.update({
         'status': 'ok' if terms else 'no_distinctive_terms',
         'returned': len(terms),
+        'truncated': total_qualifying_terms > len(terms),
+        'total_qualifying_terms': total_qualifying_terms,
         'terms': terms,
     })
     if not terms:

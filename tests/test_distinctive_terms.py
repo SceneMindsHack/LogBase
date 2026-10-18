@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 from scripts.distinctive_terms import (
     DEFAULT_EXCLUDED_TERMS,
+    MAX_WINDOW_HOURS,
+    MIN_INTERPRETATION_RECORDS,
     MAX_TOP_N,
     distinctive_terms,
     distinctive_terms_sql,
@@ -48,6 +50,11 @@ class SqlShapeTests(unittest.TestCase):
         self.assertIn("f.docs >= 5", sql)
         self.assertIn("ORDER BY excess_documents DESC, foreground_docs DESC, term ASC", sql)
         self.assertIn("LIMIT 7", sql)
+
+    def test_qualifying_count_is_computed_before_limit(self):
+        sql, _ = distinctive_terms_sql(**args(top_n=7))
+        self.assertIn("COUNT(*) OVER () AS total_qualifying_terms", sql)
+        self.assertLess(sql.index("COUNT(*) OVER ()"), sql.index("LIMIT 7"))
 
     def test_positive_excess_filter(self):
         sql, _ = distinctive_terms_sql(**args())
@@ -114,35 +121,84 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             distinctive_terms_sql(**args(levels=[]))
 
+    def test_maximum_window_boundary_accepted(self):
+        _, meta = distinctive_terms_sql(
+            dataset="bgl",
+            foreground_start="2020-01-01T00:00:00",
+            foreground_end="2020-01-02T00:00:00",
+            baseline_start="2020-01-02T00:00:00",
+            baseline_end="2020-01-03T00:00:00")
+        self.assertEqual(meta["foreground"]["duration_seconds"], 24 * 60 * 60)
+        self.assertEqual(meta["maximum_window_hours"], MAX_WINDOW_HOURS)
+
+    @patch("scripts.distinctive_terms.records")
+    def test_oversized_foreground_rejected_before_sql(self, mocked):
+        with self.assertRaisesRegex(ValueError, "at most 24 hours"):
+            distinctive_terms(
+                dataset="bgl",
+                foreground_start="2020-01-01T00:00:00",
+                foreground_end="2020-01-02T00:00:01",
+                baseline_start="2020-01-03T00:00:00",
+                baseline_end="2020-01-04T00:00:00")
+        mocked.assert_not_called()
+
+    @patch("scripts.distinctive_terms.records")
+    def test_oversized_baseline_rejected_before_sql(self, mocked):
+        with self.assertRaisesRegex(ValueError, "at most 24 hours"):
+            distinctive_terms(
+                dataset="bgl",
+                foreground_start="2020-01-01T00:00:00",
+                foreground_end="2020-01-02T00:00:00",
+                baseline_start="2020-01-02T00:00:00",
+                baseline_end="2020-01-03T00:00:01")
+        mocked.assert_not_called()
+
 
 class ExecutionLogicTests(unittest.TestCase):
     """Mocked execution: verifies scoring, flags, types, and status handling."""
 
-    def _rows(self):
-        return [
-            {"term": "timeout", "foreground_docs": "6", "baseline_docs": "1",
-             "foreground_total": "10", "baseline_total": "10",
-             "foreground_share": "0.6", "baseline_share": "0.1",
-             "share_change": "0.5", "excess_documents": "5", "ratio": "6"},
-            {"term": "newtoken", "foreground_docs": "5", "baseline_docs": "0",
-             "foreground_total": "10", "baseline_total": "10",
-             "foreground_share": "0.5", "baseline_share": "0",
-             "share_change": "0.5", "excess_documents": "5", "ratio": None},
+    def _rows(self, count=2, total_qualifying=None,
+              foreground_total=100, baseline_total=100):
+        total_qualifying = count if total_qualifying is None else total_qualifying
+        seeds = [
+            ("timeout", 60, 10),
+            ("newtoken", 50, 0),
+            ("connection", 40, 5),
         ]
+        rows = []
+        for term, foreground_docs, baseline_docs in seeds[:count]:
+            foreground_share = foreground_docs / foreground_total
+            baseline_share = (baseline_docs / baseline_total
+                              if baseline_total else 0)
+            rows.append({
+                "term": term,
+                "foreground_docs": str(foreground_docs),
+                "baseline_docs": str(baseline_docs),
+                "foreground_total": str(foreground_total),
+                "baseline_total": str(baseline_total),
+                "foreground_share": str(foreground_share),
+                "baseline_share": str(baseline_share),
+                "share_change": str(foreground_share - baseline_share),
+                "excess_documents": str(
+                    foreground_docs - foreground_total * baseline_share),
+                "ratio": (str(foreground_share / baseline_share)
+                          if baseline_share else None),
+                "total_qualifying_terms": str(total_qualifying),
+            })
+        return rows
 
     @patch("scripts.distinctive_terms.records")
     def test_scores_flags_and_types(self, mocked):
-        mocked.side_effect = [self._rows(),
-                              [{"foreground_total": "10", "baseline_total": "10"}]]
+        mocked.return_value = self._rows()
         result = distinctive_terms(**args(min_foreground_docs=5))
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["foreground_total"], 10)
+        self.assertEqual(result["foreground_total"], 100)
         timeout = result["terms"][0]
         self.assertEqual(timeout["term"], "timeout")
-        self.assertEqual(timeout["foreground_docs"], 6)
+        self.assertEqual(timeout["foreground_docs"], 60)
         self.assertEqual(timeout["share_change_pp"], 50.0)
-        self.assertEqual(timeout["excess_documents"], 5.0)
+        self.assertEqual(timeout["excess_documents"], 50.0)
         self.assertEqual(timeout["ratio"], 6.0)
         self.assertFalse(timeout["new_in_baseline_comparison"])
 
@@ -152,27 +208,127 @@ class ExecutionLogicTests(unittest.TestCase):
         json.dumps(result)  # must be serializable
 
     @patch("scripts.distinctive_terms.records")
+    def test_success_executes_only_ranking_and_discloses_it(self, mocked):
+        mocked.return_value = self._rows()
+        result = distinctive_terms(**args())
+
+        self.assertEqual(mocked.call_count, 1)
+        executed = [call.args[0] for call in mocked.call_args_list]
+        self.assertEqual(result["sql"], executed)
+        self.assertIn("total_qualifying_terms", result["sql"][0])
+
+    @patch("scripts.distinctive_terms.records")
     def test_insufficient_data_status(self, mocked):
-        mocked.side_effect = [[], [{"foreground_total": "0", "baseline_total": "10"}]]
+        mocked.side_effect = [[], [{"foreground_total": "0", "baseline_total": "100"}]]
         result = distinctive_terms(**args())
         self.assertEqual(result["status"], "insufficient_data")
         self.assertEqual(result["terms"], [])
         self.assertEqual(result["foreground_total"], 0)
+        self.assertEqual(result["returned"], 0)
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["total_qualifying_terms"], 0)
+        self.assertEqual(mocked.call_count, 2)
+        self.assertEqual(result["sql"],
+                         [call.args[0] for call in mocked.call_args_list])
 
     @patch("scripts.distinctive_terms.records")
     def test_no_distinctive_terms_status(self, mocked):
-        mocked.side_effect = [[], [{"foreground_total": "10", "baseline_total": "10"}]]
+        mocked.side_effect = [[], [{"foreground_total": "100", "baseline_total": "100"}]]
         result = distinctive_terms(**args())
         self.assertEqual(result["status"], "no_distinctive_terms")
         self.assertIn("no term met", result["note"])
+        self.assertEqual(result["returned"], 0)
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["total_qualifying_terms"], 0)
+        self.assertEqual(mocked.call_count, 2)
+        self.assertEqual(result["sql"],
+                         [call.args[0] for call in mocked.call_args_list])
+
+    @patch("scripts.distinctive_terms.records")
+    def test_empty_baseline_with_ranking_row_needs_no_fallback(self, mocked):
+        mocked.return_value = self._rows(count=1, baseline_total=0)
+        result = distinctive_terms(**args())
+
+        self.assertEqual(result["status"], "insufficient_data")
+        self.assertEqual(result["returned"], 0)
+        self.assertEqual(result["terms"], [])
+        self.assertEqual(mocked.call_count, 1)
+        self.assertEqual(result["sql"],
+                         [mocked.call_args_list[0].args[0]])
+
+    @patch("scripts.distinctive_terms.records")
+    def test_truncation_metadata_for_fewer_than_top_n(self, mocked):
+        mocked.return_value = self._rows(count=2, total_qualifying=2)
+        result = distinctive_terms(**args(top_n=3))
+        self.assertEqual(result["returned"], 2)
+        self.assertEqual(result["total_qualifying_terms"], 2)
+        self.assertFalse(result["truncated"])
+
+    @patch("scripts.distinctive_terms.records")
+    def test_truncation_metadata_for_exactly_top_n(self, mocked):
+        mocked.return_value = self._rows(count=3, total_qualifying=3)
+        result = distinctive_terms(**args(top_n=3))
+        self.assertEqual(result["returned"], 3)
+        self.assertEqual(result["total_qualifying_terms"], 3)
+        self.assertFalse(result["truncated"])
+
+    @patch("scripts.distinctive_terms.records")
+    def test_truncation_metadata_for_more_than_top_n(self, mocked):
+        mocked.return_value = self._rows(count=3, total_qualifying=8)
+        result = distinctive_terms(**args(top_n=3))
+        self.assertEqual(result["returned"], 3)
+        self.assertEqual(result["total_qualifying_terms"], 8)
+        self.assertTrue(result["truncated"])
+
+    @patch("scripts.distinctive_terms.records")
+    def test_small_baseline_warning(self, mocked):
+        mocked.return_value = self._rows(baseline_total=MIN_INTERPRETATION_RECORDS - 1)
+        result = distinctive_terms(**args())
+        self.assertEqual(len(result["warnings"]), 1)
+        self.assertIn("Baseline", result["warnings"][0])
+        self.assertIn("ratios and comparisons may be unstable", result["warnings"][0])
+
+    @patch("scripts.distinctive_terms.records")
+    def test_small_foreground_warning(self, mocked):
+        mocked.return_value = self._rows(
+            foreground_total=MIN_INTERPRETATION_RECORDS - 1)
+        result = distinctive_terms(**args())
+        self.assertEqual(len(result["warnings"]), 1)
+        self.assertIn("Foreground", result["warnings"][0])
+        self.assertIn("term rankings may be unstable", result["warnings"][0])
+
+    @patch("scripts.distinctive_terms.records")
+    def test_no_warning_for_adequate_windows(self, mocked):
+        mocked.return_value = self._rows(
+            foreground_total=MIN_INTERPRETATION_RECORDS,
+            baseline_total=MIN_INTERPRETATION_RECORDS)
+        result = distinctive_terms(**args())
+        self.assertEqual(result["warnings"], [])
+
+    @patch("scripts.distinctive_terms.records")
+    def test_empty_window_is_not_reported_as_small(self, mocked):
+        mocked.side_effect = [[], [{"foreground_total": "100", "baseline_total": "0"}]]
+        result = distinctive_terms(**args())
+        self.assertEqual(result["status"], "insufficient_data")
+        self.assertEqual(result["warnings"], [])
+
+    @patch("scripts.distinctive_terms.records")
+    def test_response_with_warnings_is_json_serializable(self, mocked):
+        mocked.return_value = self._rows(
+            foreground_total=MIN_INTERPRETATION_RECORDS - 1,
+            baseline_total=MIN_INTERPRETATION_RECORDS - 1)
+        json.dumps(distinctive_terms(**args()))
 
     @patch("scripts.distinctive_terms.records")
     def test_method_metadata_names_native_functions(self, mocked):
-        mocked.side_effect = [self._rows(),
-                              [{"foreground_total": "10", "baseline_total": "10"}]]
+        mocked.return_value = self._rows()
         result = distinctive_terms(**args())
         self.assertIn("ts_dict_agg(content)", result["method"]["functions"])
         self.assertIn("ts_dict_count(content)", result["method"]["functions"])
+        self.assertEqual(result["method"]["maximum_window_hours"], MAX_WINDOW_HOURS)
+        self.assertEqual(
+            result["method"]["small_window_warning_threshold_records"],
+            MIN_INTERPRETATION_RECORDS)
 
 
 class RegistrationTests(unittest.TestCase):
@@ -180,9 +336,22 @@ class RegistrationTests(unittest.TestCase):
         from scripts import tools
         self.assertIn("distinctive_terms", tools.mcp._tool_manager._tools)
         signature = inspect.signature(tools.distinctive_terms)
-        self.assertEqual(list(signature.parameters)[:5],
-                         ["dataset", "foreground_start", "foreground_end",
-                          "baseline_start", "baseline_end"])
+        self.assertEqual(
+            list(signature.parameters),
+            ["dataset", "foreground_start", "foreground_end",
+             "baseline_start", "baseline_end", "component", "levels",
+             "min_foreground_docs", "top_n", "exclude_terms"])
+        self.assertEqual(
+            {name: parameter.default
+             for name, parameter in signature.parameters.items()},
+            {"dataset": inspect.Parameter.empty,
+             "foreground_start": inspect.Parameter.empty,
+             "foreground_end": inspect.Parameter.empty,
+             "baseline_start": inspect.Parameter.empty,
+             "baseline_end": inspect.Parameter.empty,
+             "component": None, "levels": None,
+             "min_foreground_docs": 5, "top_n": 10,
+             "exclude_terms": None})
 
 
 @unittest.skipUnless(os.environ.get("LOGBASE_LIVE_TESTS") == "1",
