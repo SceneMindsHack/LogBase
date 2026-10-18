@@ -173,6 +173,16 @@ class RegistrationUnchangedTests(unittest.TestCase):
         self.assertIn("ROLE-AWARE ANSWERS", instr)   # role guidance section preserved
         self.assertIn("PRESENTATION", instr)
 
+    def test_role_clarification_contract(self):
+        from scripts import tools
+        instr = tools.mcp._mcp_server.instructions
+        normalized = " ".join(instr.split())
+        self.assertIn("stated or clearly implied", normalized)
+        self.assertIn("before calling tools", normalized)
+        self.assertIn("at most once per conversation", normalized)
+        self.assertIn("specific questions directly without asking for a role", normalized)
+        self.assertIn("not which questions a user may ask", normalized)
+
 
 if __name__ == "__main__":
     unittest.main()
