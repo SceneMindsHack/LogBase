@@ -1,10 +1,11 @@
 # LogBase
-# LogBase
 
 LogBase turns the massive BGL and OpenStack log corpora into evidence-grounded
 answers. An AI agent calls a set of read-only MCP tools that search and aggregate
 inside SereneDB and return only bounded evidence or exact counts — never the raw
 corpus.
+
+
 
 
 ## Setup
@@ -100,12 +101,25 @@ codex mcp add logbase -- .venv/bin/python scripts/tools.py          # Linux/macO
 codex mcp add logbase -- .venv\Scripts\python.exe scripts\tools.py  # Windows
 ```
 
-For other clients, use the block in `mcp.example.json`, replacing
-`ABSOLUTE_PATH_TO_REPO` with your checkout path.
+For other clients, add this stdio server to their MCP config, replacing
+`ABSOLUTE_PATH_TO_REPO` with your checkout path:
+
+```json
+{
+  "mcpServers": {
+    "logbase": {
+      "command": "ABSOLUTE_PATH_TO_REPO/.venv/bin/python",
+      "args": ["ABSOLUTE_PATH_TO_REPO/scripts/tools.py"]
+    }
+  }
+}
+```
 
 **Verify:** run `/mcp` (or your client's equivalent), confirm `logbase` is
 connected, then ask the agent to call `data_overview` — it should return BGL and
 OpenStack row counts. You're ready.
+
+
 
 
 ## Tools
@@ -128,13 +142,14 @@ whole picture. For full parameter tables, examples and returned fields, see
 | `top_problems` | Ranked operational hotspots by component or team | Ranked groups with counts and percentages |
 | `distinctive_terms` | Terms over-represented in a period versus a baseline, via SereneDB's native term-dictionary aggregates | Terms with document counts, shares and change |
 
-Two tools lean on SereneDB capabilities most teams never reach for: `search` uses
+Two tools lean on SereneDB capabilities: `search` uses
 its inverted full-text index for real phrase queries, and `distinctive_terms`
 computes document-frequency comparisons with the native `ts_dict_agg` /
 `ts_dict_count` aggregates — entirely in the database, with no corpus scan in Python.
 
 
-## Role-aware analysis
+
+## Role-specific analysis
 
 The same tools and the same corpus serve three distinct audiences, and LogBase
 tailors its workflow, evidence and next steps to each — never the facts,
@@ -150,6 +165,8 @@ A clear, specific question is answered directly; a broad request ("Brief me on
 OpenStack") first asks which perspective is wanted. Throughout, observed evidence
 stays separate from recommendations, and frequency or correlation is never
 presented as a confirmed cause.
+
+
 
 
 ## Extra features
@@ -168,12 +185,6 @@ For the full architecture, per-tool reference and these features in depth, see
 
 ## Tests
 
-```sh
-python -m unittest discover -s tests -v
-python scripts/check_import.py
-```
-
-The second command needs the initialized database. Local reports go to the ignored
-`reports/`; raw logs, exports, environments and `.env` are never committed.
+See [tests/tests.md](tests/tests.md) for how to run the full test suite.
 
 Data source: Loghub (Zhu et al., ISSRE 2023; BGL also Oliner and Stearley, DSN 2007).
