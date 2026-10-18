@@ -300,6 +300,9 @@ times counts once for that term. All counting happens in the database.
 | `top_n` | Number of terms to return, 1 to 50; default 10 |
 | `exclude_terms` | Optional extra exact terms to drop, added to a small default list |
 
+Each foreground and baseline window may span at most 24 hours. An exact 24-hour
+window is allowed; a longer window is rejected before database access.
+
 Example (compare two OpenStack hours on a day with data):
 
 ```json
@@ -311,9 +314,21 @@ For each term the result gives `foreground_docs`, `baseline_docs`, both shares
 (`foreground_docs - foreground_total * baseline_share`), `ratio` (null when the
 term is absent from the baseline, with `new_in_baseline_comparison` true), and
 window denominators. `method` names the native functions and the score definition.
+Every response status includes `returned`, `truncated`,
+`total_qualifying_terms`, `terms`, `warnings`, and `sql`.
+`total_qualifying_terms` and `truncated` remain accurate when `top_n` is reached.
+`sql` is an ordered list containing only statements actually executed. A successful
+ranked result normally executes one query; when no ranked rows are returned, a
+denominator fallback query may execute second. When either non-empty window has
+fewer than 100 eligible records, `warnings` explains that rankings or ratios may
+be unstable. This threshold is a practical interpretation guardrail, not a
+guarantee of statistical significance.
+
 The score orders terms by over-representation; it is a transparent heuristic, not a
 p-value. Shares are proportions of log records, not failure rates, and terms are
-investigative leads, not proven causes. `status` is `ok`, `no_distinctive_terms`,
+investigative leads, not proven causes. Document-frequency comparisons do not prove
+anomalies, distinct incidents, causes, or root causes. `status` is `ok`,
+`no_distinctive_terms`,
 or `insufficient_data` (a window with no eligible records). Eligible records are
 timed rows with non-null content matching the filters. Results reflect the index
 as last refreshed by `scripts/search_logs.py --setup`.
