@@ -89,6 +89,65 @@ evidence by source identity when needed. Time filters use source-local ISO dates
 inclusive `--since` and exclusive `--until`. Full-text tokens differ from substring
 matching, so no misleading substring-versus-token speedup is claimed.
 
+## Connect an agent (MCP server)
+
+The tools listed in the tool catalog are exposed through an MCP server,
+`scripts/tools.py` (stdio transport), so any MCP client (Claude Code, Codex,
+Cursor, Kiro) can discover and call them.
+
+Before connecting, finish the Quick start: Docker is running with SereneDB,
+`.env` exists (copy `.env.example`), the data is loaded, and the full-text
+indexes are built (`python scripts/search_logs.py --setup`).
+
+**Server command**
+
+| Field | Value |
+|---|---|
+| `command` | Python interpreter: `.venv/Scripts/python.exe` (Windows), `.venv/bin/python` (Linux/macOS), or plain `python` if the packages in `requirements.txt` are installed globally |
+| `args` | `["scripts/tools.py"]` |
+
+The server reads its database connection from `.env` in the repository root,
+whatever directory it is started from.
+
+**Quick add (run from the repository root)**
+
+`--scope project` writes a shareable `.mcp.json` at the repo root, so the config
+travels with the checkout.
+
+```sh
+# Claude Code (Linux/macOS)
+claude mcp add logbase --scope project -- .venv/bin/python scripts/tools.py
+
+# Claude Code (Windows PowerShell)
+claude mcp add logbase --scope project -- .venv\Scripts\python.exe scripts\tools.py
+
+# Codex (Linux/macOS)
+codex mcp add logbase -- .venv/bin/python scripts/tools.py
+
+# Codex (Windows PowerShell)
+codex mcp add logbase -- .venv\Scripts\python.exe scripts\tools.py
+```
+
+The `--` separates the client's own flags from the server command.
+
+**Other clients (Cursor, Kiro, ...)**
+
+Add a stdio MCP server using the block in `mcp.example.json`, replacing
+`ABSOLUTE_PATH_TO_REPO` with the full path to your checkout.
+
+**Check that it works**
+
+1. Run `/mcp` in Claude Code (or your client's equivalent) and confirm `logbase`
+   is connected.
+2. Ask the agent to call `data_overview`. It should return row counts for BGL
+   and OpenStack.
+3. If your client does not show server instructions, paste the guidance from
+   `INSTRUCTIONS` in `scripts/tools.py` into the chat before asking questions.
+
+The `logbase` server is separate from the SereneDB **docs** MCP
+(`https://api.serenedb.com/mcp`) used during setup. Keep both configured if you
+want the agent to answer SereneDB questions as well.
+
 ## Role-aware agent usage
 
 Once the `logbase` MCP server is configured in a supported client, Codex,

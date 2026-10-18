@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "logbase": {
+      "command": "ABSOLUTE_PATH_TO_REPO/.venv/bin/python",
+      "args": ["ABSOLUTE_PATH_TO_REPO/scripts/tools.py"]
+    }
+  }
+}
